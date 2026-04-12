@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>下單 - 一鬥讚 YIDOJAN</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .order-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3rem;
+      margin-top: 2.5rem;
+    }
+
+    .menu-panel {
+      background: white;
+      border: 1px solid var(--border-light);
+      border-radius: 8px;
+      padding: 2.5rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+
+    .menu-panel h3 {
+      color: var(--primary-orange);
+      margin-bottom: 2rem;
+      font-size: 1.4rem;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+    }
+
+    .menu-item {
+      padding: 1.5rem;
+      border-bottom: 1px solid var(--border-light);
+      cursor: pointer;
+      transition: all 0.3s ease;
+      border-radius: 4px;
+      margin-bottom: 0.5rem;
+    }
+
+    .menu-item:last-child {
+      border-bottom: none;
+    }
+
+    .menu-item:hover {
+      background: linear-gradient(135deg, rgba(255, 127, 63, 0.05), rgba(255, 179, 128, 0.05));
+      transform: translateX(8px);
+      border-left: 3px solid var(--accent-orange);
+      padding-left: 1.2rem;
+    }
+
+    .menu-item-name {
+      font-weight: 600;
+      color: var(--primary-orange);
+      margin-bottom: 0.4rem;
+      font-size: 1.05rem;
+    }
+
+    .menu-item-desc {
+      font-size: 0.85rem;
+      color: var(--text-light);
+      margin-bottom: 0.8rem;
+      line-height: 1.5;
+    }
+
+    .menu-item-price {
+      font-size: 1.2rem;
+      color: var(--accent-orange);
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+
+    .order-panel {
+      background: white;
+      border: 1px solid var(--border-light);
+      border-radius: 8px;
+      padding: 2.5rem;
+      height: fit-content;
+      position: sticky;
+      top: 100px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    .order-panel h3 {
+      color: var(--primary-orange);
+      margin-bottom: 2rem;
+      font-size: 1.4rem;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+    }
+
+    .order-form {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .form-group label {
+      color: var(--primary-orange);
+      font-weight: 500;
+      margin-bottom: 0.5rem;
+      font-size: 0.95rem;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      padding: 0.9rem;
+      border: 1.5px solid var(--border-light);
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      color: var(--text-dark);
+      background: white;
+      transition: all 0.3s ease;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 100px;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: var(--primary-orange);
+      box-shadow: 0 0 0 4px rgba(255, 127, 63, 0.1);
+      background: rgba(255, 127, 63, 0.02);
+    }
+
+    .order-summary {
+      background: linear-gradient(135deg, var(--light-bg) 0%, rgba(255, 179, 128, 0.1) 100%);
+      padding: 1.5rem;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      border: 1px solid var(--border-light);
+    }
+
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.8rem;
+      font-size: 0.95rem;
+      color: var(--text-dark);
+    }
+
+    .summary-total {
+      border-top: 2px solid var(--border-light);
+      padding-top: 1.2rem;
+      margin-top: 1rem;
+      display: flex;
+      justify-content: space-between;
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: var(--primary-orange);
+    }
+
+    .submit-btn {
+      background: linear-gradient(135deg, var(--primary-orange), var(--secondary-orange));
+      color: white;
+      padding: 1rem 2rem;
+      border: none;
+      border-radius: 6px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      box-shadow: 0 4px 12px rgba(255, 127, 63, 0.3);
+      width: 100%;
+    }
+
+    .submit-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(255, 127, 63, 0.4);
+    }
+
+    .contact-info {
+      background: linear-gradient(135deg, var(--light-bg) 0%, rgba(255, 179, 128, 0.1) 100%);
+      padding: 1.5rem;
+      border-radius: 8px;
+      margin-top: 2rem;
+      font-size: 0.9rem;
+      line-height: 1.8;
+      border: 1px solid var(--border-light);
+    }
+
+    .contact-info h4 {
+      color: var(--primary-orange);
+      margin-bottom: 0.8rem;
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+
+    @media (max-width: 1024px) {
+      .order-container {
+        grid-template-columns: 1fr;
+      }
+
+      .order-panel {
+        position: static;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- NAVIGATION -->
+  <nav>
+    <div class="container">
+      <a href="index.html" class="logo-link">
+        <img src="logo.png" alt="YIDOJAN Logo" class="logo-img">
+      </a>
+      <ul>
+        <li><a href="index.html">首頁</a></li>
+        <li><a href="about.html">關於</a></li>
+        <li><a href="menu.html">菜單</a></li>
+        <li><a href="order.html" class="active">下單</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-content">
+      <h1>線上下單</h1>
+      <p>選擇你喜歡的飲品，我們會為你準備最新鮮的茶飲</p>
+    </div>
+  </div>
+
+  <!-- ORDER SECTION -->
+  <section class="container">
+    <h2>下單方式</h2>
+    <p class="subtitle">選擇飲品 - 填寫資訊 - 完成下單</p>
+
+    <div class="order-container">
+      <!-- 菜單面板 -->
+      <div class="menu-panel">
+        <h3>📋 精選飲品</h3>
+
+        <div class="menu-item" onclick="selectItem('烏龍茶', 45)">
+          <div class="menu-item-name">烏龍茶</div>
+          <div class="menu-item-desc">精選半發酵烏龍，甘醇回甘</div>
+          <div class="menu-item-price">$45</div>
+        </div>
+
+        <div class="menu-item" onclick="selectItem('高山綠茶', 45)">
+          <div class="menu-item-name">高山綠茶</div>
+          <div class="menu-item-desc">清香爽口，帶有自然甘甜</div>
+          <div class="menu-item-price">$45</div>
+        </div>
+
+        <div class="menu-item" onclick="selectItem('紅茶', 45)">
+          <div class="menu-item-name">紅茶</div>
+          <div class="menu-item-desc">醇厚甘甜，香氣馥郁</div>
+          <div class="menu-item-price">$45</div>
+        </div>
+
+        <div class="menu-item" onclick="selectItem('檸檬綠茶', 50)">
+          <div class="menu-item-name">檸檬綠茶</div>
+          <div class="menu-item-desc">爽口檸檬，清新綠茶</div>
+          <div class="menu-item-price">$50</div>
+        </div>
+
+        <div class="menu-item" onclick="selectItem('西瓜冰沙', 40)">
+          <div class="menu-item-name">西瓜冰沙</div>
+          <div class="menu-item-desc">清涼西瓜，甘甜多汁</div>
+          <div class="menu-item-price">$40</div>
+        </div>
+
+        <div class="menu-item" onclick="selectItem('蜂蜜柚子茶', 50)">
+          <div class="menu-item-name">蜂蜜柚子茶</div>
+          <div class="menu-item-desc">自製柚子醬，天然蜂蜜</div>
+          <div class="menu-item-price">$50</div>
+        </div>
+
+        <div class="menu-item" onclick="selectItem('黑糖珍珠奶茶', 50)">
+          <div class="menu-item-name">黑糖珍珠奶茶</div>
+          <div class="menu-item-desc">香濃黑糖，Q彈珍珠</div>
+          <div class="menu-item-price">$50</div>
+        </div>
+
+        <div class="menu-item" onclick="selectItem('抹茶拿鐵', 55)">
+          <div class="menu-item-name">抹茶拿鐵</div>
+          <div class="menu-item-desc">京都抹茶，濃郁香氣</div>
+          <div class="menu-item-price">$55</div>
+        </div>
+      </div>
+
+      <!-- 下單面板 -->
+      <div class="order-panel">
+        <h3>🛒 下單確認</h3>
+
+        <div class="order-form">
+          <div class="form-group">
+            <label>選擇飲品 *</label>
+            <input type="text" id="selectedItem" placeholder="點擊左邊飲品選擇" readonly style="background: white; cursor: pointer;">
+          </div>
+
+          <div class="form-group">
+            <label>數量 *</label>
+            <input type="number" id="quantity" min="1" value="1">
+          </div>
+
+          <div class="form-group">
+            <label>溫度</label>
+            <select id="temperature">
+              <option value="熱">熱</option>
+              <option value="溫">溫</option>
+              <option value="冰">冰</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>特殊要求</label>
+            <textarea id="notes" placeholder="例：少糖、無糖、加冰等"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>姓名 *</label>
+            <input type="text" id="name" placeholder="輸入您的姓名">
+          </div>
+
+          <div class="form-group">
+            <label>電話 *</label>
+            <input type="tel" id="phone" placeholder="輸入您的電話號碼">
+          </div>
+
+          <div class="form-group">
+            <label>取貨方式 *</label>
+            <select id="pickupMethod">
+              <option value="店面取貨">店面取貨</option>
+              <option value="外送">外送（限新竹地區）</option>
+            </select>
+          </div>
+
+          <div class="order-summary">
+            <div class="summary-row">
+              <span id="summaryItem">未選擇飲品</span>
+              <span id="summaryPrice">$0</span>
+            </div>
+            <div class="summary-row">
+              <span>數量: <span id="summaryQty">1</span></span>
+            </div>
+            <div class="summary-total">
+              <span>合計:</span>
+              <span id="totalPrice">$0</span>
+            </div>
+          </div>
+
+          <button class="submit-btn" onclick="submitOrder()">確認下單</button>
+        </div>
+
+        <div class="contact-info">
+          <h4>📍 店鋪資訊</h4>
+          <p>
+            地點：秀水鎮安美街中華路327號，Changhua 504<br>
+            電話：0988277290<br>
+            營業時間：週一至週五 12:00-20:00<br>
+            週六至週日 11:00-21:00
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="container">
+      <div>
+        <h4>一鬥讚</h4>
+        <p>精選台灣茶葉，用心製作每一杯茶飲。品質、新鮮、天然是我們的堅持。</p>
+      </div>
+      <div>
+        <h4>營業時間</h4>
+        <p>週一至週五：12:00 - 20:00<br>週六至週日：11:00 - 21:00<br>周一公休</p>
+      </div>
+      <div>
+        <h4>聯絡方式</h4>
+        <p>電話：0988277290<br>地址：秀水鎮安美街中華路327號，Changhua 504<br>Email：yidojan@email.com</p>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>&copy; 2024 一鬥讚 YIDOJAN. All rights reserved.</p>
+    </div>
+  </footer>
+
+  <script>
+    let selectedItem = '';
+    let selectedPrice = 0;
+
+    function selectItem(name, price) {
+      selectedItem = name;
+      selectedPrice = price;
+      document.getElementById('selectedItem').value = name;
+      updateSummary();
+    }
+
+    function updateSummary() {
+      const qty = parseInt(document.getElementById('quantity').value) || 1;
+      const total = selectedPrice * qty;
+
+      document.getElementById('summaryItem').textContent = selectedItem || '未選擇飲品';
+      document.getElementById('summaryPrice').textContent = '$' + selectedPrice;
+      document.getElementById('summaryQty').textContent = qty;
+      document.getElementById('totalPrice').textContent = '$' + total;
+    }
+
+    document.getElementById('quantity').addEventListener('change', updateSummary);
+
+    function submitOrder() {
+      const name = document.getElementById('name').value;
+      const phone = document.getElementById('phone').value;
+
+      if (!selectedItem) {
+        alert('請選擇飲品');
+        return;
+      }
+
+      if (!name) {
+        alert('請輸入姓名');
+        return;
+      }
+
+      if (!phone) {
+        alert('請輸入電話號碼');
+        return;
+      }
+
+      alert('感謝您的下單！\n\n飲品：' + selectedItem + '\n電話將在15分鐘內由我們聯繫確認。');
+      // 實際應用中，這裡應該提交到後端服務器
+    }
+  </script>
+</body>
+</html>
