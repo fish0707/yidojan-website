@@ -1,14 +1,14 @@
 /* YI DOU ZAN - Multi-page Website Style */
 
 :root {
-  --primary-brown: #6B5344;
-  --secondary-brown: #8B7355;
-  --accent-green: #8B9D6F;
-  --light-cream: #F5F1ED;
+  --primary-orange: #FF7F3F;
+  --secondary-orange: #FF9966;
+  --accent-orange: #FFB380;
+  --light-bg: #FFF5F0;
   --white: #FFFFFF;
   --text-dark: #3D3D3D;
   --text-light: #6B6B6B;
-  --border-light: #E8E4DF;
+  --border-light: #FFE8DC;
 }
 
 * {
@@ -23,7 +23,7 @@ html {
 
 body {
   font-family: 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
-  background-color: var(--light-cream);
+  background-color: var(--light-bg);
   color: var(--text-dark);
   line-height: 1.6;
 }
@@ -47,12 +47,21 @@ nav .container {
   margin: 0 auto;
 }
 
-nav .logo {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: var(--primary-brown);
+nav .logo-link {
+  display: flex;
+  align-items: center;
   text-decoration: none;
-  letter-spacing: 0.05em;
+  transition: transform 0.3s ease;
+}
+
+nav .logo-link:hover {
+  transform: scale(1.05);
+}
+
+nav .logo-img {
+  height: 50px;
+  width: auto;
+  max-width: 120px;
 }
 
 nav ul {
@@ -77,12 +86,12 @@ nav a::after {
   height: 2px;
   bottom: -4px;
   left: 0;
-  background-color: var(--accent-green);
+  background-color: var(--accent-orange);
   transition: width 0.3s ease;
 }
 
 nav a:hover {
-  color: var(--accent-green);
+  color: var(--accent-orange);
 }
 
 nav a:hover::after {
@@ -90,7 +99,7 @@ nav a:hover::after {
 }
 
 nav a.active {
-  color: var(--accent-green);
+  color: var(--accent-orange);
 }
 
 nav a.active::after {
@@ -106,14 +115,14 @@ nav a.active::after {
 
 /* HERO SECTION */
 .hero {
-  background: linear-gradient(135deg, #F5F1ED 0%, #FFFFFF 100%);
+  background: linear-gradient(135deg, #FFF5F0 0%, #FFFFFF 100%);
   padding: 6rem 2rem;
   text-align: center;
 }
 
 .hero-content h1 {
   font-size: 3rem;
-  color: var(--primary-brown);
+  color: var(--primary-orange);
   margin-bottom: 1rem;
   font-weight: 300;
   letter-spacing: 0.05em;
@@ -129,7 +138,7 @@ nav a.active::after {
 
 .hero-cta {
   display: inline-block;
-  background-color: var(--primary-brown);
+  background-color: var(--primary-orange);
   color: white;
   padding: 1rem 2.5rem;
   text-decoration: none;
@@ -139,7 +148,7 @@ nav a.active::after {
 }
 
 .hero-cta:hover {
-  background-color: var(--secondary-brown);
+  background-color: var(--secondary-orange);
 }
 
 /* SECTION STYLES */
@@ -150,12 +159,12 @@ section {
 }
 
 section:nth-child(even) {
-  background-color: var(--light-cream);
+  background-color: var(--light-bg);
 }
 
 section h2 {
   font-size: 2.2rem;
-  color: var(--primary-brown);
+  color: var(--primary-orange);
   margin-bottom: 1rem;
   font-weight: 300;
   text-align: center;
@@ -179,7 +188,7 @@ section .subtitle {
 
 .two-column-text h3 {
   font-size: 1.5rem;
-  color: var(--primary-brown);
+  color: var(--primary-orange);
   margin-bottom: 1rem;
   font-weight: 400;
 }
@@ -191,7 +200,7 @@ section .subtitle {
 }
 
 .two-column-image {
-  background-color: var(--light-cream);
+  background-color: var(--light-bg);
   border-radius: 4px;
   overflow: hidden;
   aspect-ratio: 1;
@@ -227,7 +236,7 @@ section .subtitle {
 .gallery-item-image {
   width: 100%;
   aspect-ratio: 1;
-  background-color: var(--light-cream);
+  background-color: var(--light-bg);
   overflow: hidden;
 }
 
@@ -243,7 +252,7 @@ section .subtitle {
 
 .gallery-item-content h3 {
   font-size: 1.1rem;
-  color: var(--primary-brown);
+  color: var(--primary-orange);
   margin-bottom: 0.5rem;
   font-weight: 500;
 }
@@ -293,14 +302,14 @@ section .subtitle {
 
 .product-card h3 {
   font-size: 1.2rem;
-  color: var(--primary-brown);
+  color: var(--primary-orange);
   margin-bottom: 0.5rem;
   font-weight: 500;
 }
 
 .product-card .price {
   font-size: 1.3rem;
-  color: var(--accent-green);
+  color: var(--accent-orange);
   font-weight: 600;
   margin: 1rem 0;
 }
@@ -327,7 +336,7 @@ section .subtitle {
   display: inline-block;
   width: 50px;
   height: 50px;
-  background-color: var(--accent-green);
+  background-color: var(--accent-orange);
   color: white;
   border-radius: 50%;
   display: flex;
@@ -339,7 +348,7 @@ section .subtitle {
 }
 
 .process-step h4 {
-  color: var(--primary-brown);
+  color: var(--primary-orange);
   font-size: 1rem;
   margin-bottom: 0.5rem;
 }
@@ -351,7 +360,7 @@ section .subtitle {
 
 /* FOOTER */
 footer {
-  background-color: var(--primary-brown);
+  background-color: var(--primary-orange);
   color: var(--white);
   padding: 3rem 2rem;
   margin-top: 4rem;
@@ -377,7 +386,7 @@ footer p, footer a {
 }
 
 footer a:hover {
-  color: var(--accent-green);
+  color: var(--accent-orange);
 }
 
 .social-icons {
@@ -399,7 +408,7 @@ footer a:hover {
 }
 
 .social-icons a:hover {
-  background-color: var(--accent-green);
+  background-color: var(--accent-orange);
 }
 
 footer .footer-bottom {
