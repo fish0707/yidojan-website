@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>珍珠奶茶 · 點餐</title>
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/versions/2.22.3/sdk.js"></script>
+<style>
+  /* ── Reset & Token ─────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #faf7f2;
+    --surface: #ffffff;
+    --brown: #6b3a2a;
+    --brown-light: #c8956a;
+    --green: #2d6a4f;
+    --red: #c0392b;
+    --text: #1a1208;
+    --muted: #9e8c7e;
+    --border: #e8ddd0;
+    --radius: 14px;
+    --safe-bottom: env(safe-area-inset-bottom, 16px);
+  }
+  body { font-family: 'Noto Sans TC', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── Header ─────────────────────────────────────────── */
+  .header { background: var(--brown); color: #f5deb3; padding: 14px 16px 12px; position: sticky; top: 0; z-index: 50; }
+  .header h1 { font-size: 18px; font-weight: 700; letter-spacing: 1px; }
+  .header .sub { font-size: 11px; color: #c4a882; margin-top: 2px; }
+
+  /* ── Menu Grid ──────────────────────────────────────── */
+  .section-title { font-size: 13px; font-weight: 600; color: var(--muted); padding: 14px 16px 6px; letter-spacing: 1px; text-transform: uppercase; }
+  .menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 12px 16px; }
+  .menu-card {
+    background: var(--surface); border-radius: var(--radius); padding: 14px 12px;
+    border: 2px solid var(--border); cursor: pointer; transition: border-color .15s, transform .1s;
+    position: relative; overflow: hidden;
+  }
+  .menu-card:active { transform: scale(.97); }
+  .menu-card.sold-out { opacity: .5; cursor: not-allowed; }
+  .menu-card .emoji { font-size: 30px; margin-bottom: 8px; display: block; }
+  .menu-card .name { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+  .menu-card .price { font-size: 16px; font-weight: 700; color: var(--brown); }
+  .menu-card .badge { position: absolute; top: 8px; right: 8px; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 99px; }
+
+  /* ── Cart Bar ───────────────────────────────────────── */
+  .cart-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding: 10px 16px calc(10px + var(--safe-bottom));
+    background: var(--brown); display: none; align-items: center; justify-content: space-between;
+    z-index: 60;
+  }
+  .cart-bar.show { display: flex; }
+  .cart-bar .info { color: #f5deb3; }
+  .cart-bar .info .count { font-size: 12px; margin-bottom: 1px; }
+  .cart-bar .info .total { font-size: 20px; font-weight: 700; }
+  .cart-bar .btn-checkout {
+    background: #f5deb3; color: var(--brown); border: none; border-radius: 10px;
+    padding: 10px 22px; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit;
+  }
+
+  /* ── Bottom Sheet (Modal) ────────────────────────────── */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 70; display: none; }
+  .overlay.show { display: block; }
+  .sheet {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 80;
+    background: var(--surface); border-radius: 20px 20px 0 0;
+    padding: 20px 20px calc(20px + var(--safe-bottom));
+    max-height: 90vh; overflow-y: auto;
+    transform: translateY(100%); transition: transform .3s ease;
+  }
+  .sheet.show { transform: translateY(0); }
+  .sheet-title { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+  .sheet-price { font-size: 15px; color: var(--brown-light); margin-bottom: 18px; }
+
+  .option-group { margin-bottom: 16px; }
+  .option-group label { font-size: 12px; color: var(--muted); font-weight: 600; display: block; margin-bottom: 8px; text-transform: uppercase; letter-spacing: .5px; }
+  .option-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill {
+    padding: 7px 14px; border-radius: 99px; font-size: 13px; cursor: pointer;
+    border: 1.5px solid var(--border); background: var(--bg); color: var(--text);
+    font-family: inherit; font-weight: 500; transition: .12s;
+  }
+  .pill.active-brown { background: var(--brown); color: #fff; border-color: var(--brown); }
+  .pill.active-blue  { background: #2c6e8a; color: #fff; border-color: #2c6e8a; }
+  .pill.active-green { background: var(--green); color: #fff; border-color: var(--green); }
+
+  /* qty */
+  .qty-row { display: flex; align-items: center; gap: 14px; margin: 4px 0 20px; }
+  .qty-btn { width: 34px; height: 34px; border: 1.5px solid var(--border); background: var(--bg); border-radius: 8px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .qty-num { font-size: 18px; font-weight: 700; min-width: 24px; text-align: center; }
+
+  .btn-add {
+    width: 100%; padding: 14px; background: var(--brown); color: #fff;
+    border: none; border-radius: 12px; font-size: 16px; font-weight: 700;
+    font-family: inherit; cursor: pointer;
+  }
+  .btn-add:active { transform: scale(.98); }
+
+  /* ── Confirm Sheet ──────────────────────────────────── */
+  .cart-item-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .cart-item-row:last-child { border: none; }
+  .cart-item-detail { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .total-row { display: flex; justify-content: space-between; font-weight: 700; font-size: 16px; margin: 12px 0; }
+  .remark-input { width: 100%; border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 12px; font-family: inherit; font-size: 14px; margin-bottom: 14px; background: var(--bg); }
+  .btn-submit { width: 100%; padding: 14px; background: var(--green); color: #fff; border: none; border-radius: 12px; font-size: 16px; font-weight: 700; font-family: inherit; cursor: pointer; }
+  .btn-submit:disabled { background: var(--muted); cursor: not-allowed; }
+
+  /* ── Toast ──────────────────────────────────────────── */
+  .toast { position: fixed; top: 60px; left: 50%; transform: translateX(-50%) translateY(-8px); background: var(--text); color: #fff; padding: 9px 20px; border-radius: 99px; font-size: 13px; font-weight: 500; opacity: 0; transition: .25s; pointer-events: none; z-index: 200; white-space: nowrap; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🧋 珍珠奶茶點餐</h1>
+  <div class="sub" id="userName">載入中…</div>
+</div>
+
+<div class="section-title">今日菜單</div>
+<div class="menu-grid" id="menuGrid">
+  <div style="grid-column:1/-1;text-align:center;padding:30px;color:var(--muted)">菜單載入中…</div>
+</div>
+<div style="height:80px"></div>
+
+<!-- Cart Bar -->
+<div class="cart-bar" id="cartBar">
+  <div class="info">
+    <div class="count" id="cartCount">0 項商品</div>
+    <div class="total" id="cartTotal">$0</div>
+  </div>
+  <button class="btn-checkout" onclick="openConfirmSheet()">查看訂單 →</button>
+</div>
+
+<!-- Item Customise Sheet -->
+<div class="overlay" id="overlay" onclick="closeAllSheets()"></div>
+<div class="sheet" id="itemSheet">
+  <div class="sheet-title" id="sheetName">飲料名稱</div>
+  <div class="sheet-price" id="sheetPrice">$0</div>
+
+  <div class="option-group">
+    <label>甜度</label>
+    <div class="option-pills" id="sugarPills"></div>
+  </div>
+  <div class="option-group">
+    <label>冰塊</label>
+    <div class="option-pills" id="icePills"></div>
+  </div>
+  <div class="option-group">
+    <label>加料（可複選）</label>
+    <div class="option-pills" id="toppingPills"></div>
+  </div>
+
+  <div class="option-group">
+    <label>數量</label>
+    <div class="qty-row">
+      <button class="qty-btn" onclick="changeQty(-1)">−</button>
+      <span class="qty-num" id="qtyNum">1</span>
+      <button class="qty-btn" onclick="changeQty(1)">+</button>
+    </div>
+  </div>
+  <button class="btn-add" id="btnAdd" onclick="addToCart()">加入訂單</button>
+</div>
+
+<!-- Confirm Sheet -->
+<div class="sheet" id="confirmSheet">
+  <div class="sheet-title" style="margin-bottom:14px">確認訂單</div>
+  <div id="confirmItems"></div>
+  <div class="total-row"><span>合計</span><span id="confirmTotal">$0</span></div>
+  <input class="remark-input" id="remark" placeholder="備註（例如：不要吸管、外帶）">
+  <button class="btn-submit" id="btnSubmit" onclick="submitOrder()">送出訂單</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── 設定 ─────────────────────────────────────────────────────────────────────
+const GAS_URL   = 'https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec'; // ← 換成你的 GAS 部署網址
+const LIFF_ID   = 'YOUR_LIFF_ID'; // ← 換成你的 LIFF ID
+
+const SUGAR_OPT   = ['全糖','少糖','半糖','微糖','無糖'];
+const ICE_OPT     = ['正常冰','少冰','微冰','去冰','熱'];
+const TOPPING_OPT = ['珍珠','椰果','布丁','寒天','紅豆'];
+
+// ─── 狀態 ─────────────────────────────────────────────────────────────────────
+let menu = [];
+let cart = [];
+let currentItem = null;
+let selectedSugar = '半糖', selectedIce = '少冰';
+let selectedToppings = new Set();
+let qty = 1;
+let liffProfile = null;
+
+// ─── LIFF 初始化 ──────────────────────────────────────────────────────────────
+(async () => {
+  try {
+    await liff.init({ liffId: LIFF_ID });
+    if (liff.isLoggedIn()) {
+      liffProfile = await liff.getProfile();
+      document.getElementById('userName').textContent = `Hi ${liffProfile.displayName} 👋`;
+    }
+  } catch (e) {
+    console.warn('LIFF init failed (可能在瀏覽器測試):', e.message);
+    document.getElementById('userName').textContent = 'LINE 點餐';
+  }
+  await loadMenu();
+})();
+
+// ─── 載入菜單 ─────────────────────────────────────────────────────────────────
+async function loadMenu() {
+  const grid = document.getElementById('menuGrid');
+  try {
+    const res = await fetch(`${GAS_URL}?action=getMenu`);
+    const data = await res.json();
+    menu = data.menu || [];
+  } catch (e) {
+    // 離線 Demo 資料
+    menu = [
+      { id:'P001', name:'黑糖珍奶', price:75, available:true,  emoji:'🧋' },
+      { id:'P002', name:'烏龍珍珠', price:65, available:true,  emoji:'🍵' },
+      { id:'P003', name:'芋泥鮮奶', price:80, available:true,  emoji:'🟣' },
+      { id:'P004', name:'紅茶拿鐵', price:60, available:true,  emoji:'🍶' },
+      { id:'P005', name:'椰果奶茶', price:65, available:false, emoji:'🥥' },
+    ];
+  }
+  renderMenu();
+}
+
+function renderMenu() {
+  const grid = document.getElementById('menuGrid');
+  grid.innerHTML = menu.map(p => `
+    <div class="menu-card ${p.available ? '' : 'sold-out'}" onclick="${p.available ? `openItemSheet('${p.id}')` : ''}">
+      <span class="emoji">${p.emoji || '🧋'}</span>
+      <div class="name">${p.name}</div>
+      <div class="price">$${p.price}</div>
+      ${!p.available ? '<div class="badge">售完</div>' : ''}
+    </div>
+  `).join('');
+}
+
+// ─── 開啟品項客製 Sheet ───────────────────────────────────────────────────────
+function openItemSheet(productId) {
+  currentItem = menu.find(p => p.id === productId);
+  if (!currentItem) return;
+
+  document.getElementById('sheetName').textContent = `${currentItem.emoji || ''} ${currentItem.name}`;
+  document.getElementById('sheetPrice').textContent = `$${currentItem.price}`;
+  document.getElementById('btnAdd').textContent = `加入訂單  $${currentItem.price}`;
+
+  selectedSugar = '半糖'; selectedIce = '少冰'; selectedToppings = new Set(); qty = 1;
+  renderPills('sugarPills',   SUGAR_OPT,   'brown', () => selectedSugar,   v => { selectedSugar = v; renderPills('sugarPills', SUGAR_OPT, 'brown', () => selectedSugar, () => {}); });
+  renderPills('icePills',     ICE_OPT,     'blue',  () => selectedIce,     v => { selectedIce = v;   renderPills('icePills', ICE_OPT, 'blue', () => selectedIce, () => {}); });
+  renderToppingPills();
+  document.getElementById('qtyNum').textContent = qty;
+
+  openSheet('itemSheet');
+}
+
+function renderPills(containerId, options, color, getSelected, onSelect) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = options.map(opt => `
+    <button class="pill ${getSelected() === opt ? 'active-' + color : ''}"
+      onclick="(${onSelect.toString()})('${opt}');this.closest('.option-pills').querySelectorAll('.pill').forEach(p=>p.classList.remove('active-${color}'));this.classList.add('active-${color}')">
+      ${opt}
+    </button>`).join('');
+}
+
+function renderToppingPills() {
+  const container = document.getElementById('toppingPills');
+  container.innerHTML = TOPPING_OPT.map(t => `
+    <button class="pill ${selectedToppings.has(t) ? 'active-green' : ''}"
+      onclick="toggleTopping('${t}', this)">+${t}</button>`).join('');
+}
+function toggleTopping(name, el) {
+  if (selectedToppings.has(name)) { selectedToppings.delete(name); el.classList.remove('active-green'); }
+  else { selectedToppings.add(name); el.classList.add('active-green'); }
+}
+
+function changeQty(delta) {
+  qty = Math.max(1, qty + delta);
+  document.getElementById('qtyNum').textContent = qty;
+  document.getElementById('btnAdd').textContent = `加入訂單  $${currentItem.price * qty}`;
+}
+
+// ─── 購物車 ───────────────────────────────────────────────────────────────────
+function addToCart() {
+  cart.push({
+    cartId: Date.now(),
+    productId: currentItem.id,
+    name: currentItem.name,
+    emoji: currentItem.emoji || '',
+    price: currentItem.price,
+    qty,
+    sugar: selectedSugar,
+    ice: selectedIce,
+    toppings: [...selectedToppings],
+  });
+  closeAllSheets();
+  updateCartBar();
+  showToast(`已加入 ${currentItem.name} ×${qty}`);
+}
+
+function updateCartBar() {
+  const count = cart.reduce((s, i) => s + i.qty, 0);
+  const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
+  document.getElementById('cartCount').textContent = `${count} 項商品`;
+  document.getElementById('cartTotal').textContent = `$${total}`;
+  document.getElementById('cartBar').classList.toggle('show', count > 0);
+}
+
+// ─── 確認訂單 Sheet ───────────────────────────────────────────────────────────
+function openConfirmSheet() {
+  const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
+  document.getElementById('confirmItems').innerHTML = cart.map(i => `
+    <div class="cart-item-row">
+      <div>
+        <div>${i.emoji} ${i.name} ×${i.qty}</div>
+        <div class="cart-item-detail">${i.sugar} / ${i.ice}${i.toppings.length ? ' / ' + i.toppings.join(', ') : ''}</div>
+      </div>
+      <div style="font-weight:600">$${i.price * i.qty}</div>
+    </div>`).join('');
+  document.getElementById('confirmTotal').textContent = `$${total}`;
+  openSheet('confirmSheet');
+}
+
+// ─── 送出訂單 ─────────────────────────────────────────────────────────────────
+async function submitOrder() {
+  const btn = document.getElementById('btnSubmit');
+  btn.disabled = true;
+  btn.textContent = '送出中…';
+
+  const payload = {
+    action:      'placeOrder',
+    userId:      liffProfile?.userId || 'anonymous',
+    displayName: liffProfile?.displayName || '匿名',
+    items: cart.map(i => ({
+      productId: i.productId,
+      qty:       i.qty,
+      sugar:     i.sugar,
+      ice:       i.ice,
+      toppings:  i.toppings,
+    })),
+    remark: document.getElementById('remark').value.trim(),
+  };
+
+  try {
+    const res  = await fetch(GAS_URL, { method:'POST', body: JSON.stringify(payload) });
+    const data = await res.json();
+
+    if (data.status === 'success') {
+      cart = [];
+      updateCartBar();
+      closeAllSheets();
+      showOrderSuccess(data.orderId, data.total);
+    } else if (data.status === 'soldout') {
+      showToast('⚠️ ' + data.error);
+    } else {
+      showToast('送出失敗：' + (data.error || '未知錯誤'));
+    }
+  } catch (e) {
+    showToast('網路錯誤，請重試');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '送出訂單';
+  }
+}
+
+function showOrderSuccess(orderId, total) {
+  document.querySelector('.menu-grid').insertAdjacentHTML('beforebegin', `
+    <div id="successBanner" style="margin:16px;background:#e8f5ef;border-radius:14px;padding:20px;text-align:center">
+      <div style="font-size:36px;margin-bottom:8px">✅</div>
+      <div style="font-weight:700;font-size:16px;color:#2d6a4f">訂單送出成功！</div>
+      <div style="font-size:13px;color:#555;margin-top:4px">訂單編號：${orderId}</div>
+      <div style="font-size:13px;color:#555">金額：$${total}</div>
+      <div style="font-size:12px;color:#888;margin-top:8px">請稍候，店員確認後即開始製作 🧋</div>
+    </div>`);
+  setTimeout(() => document.getElementById('successBanner')?.remove(), 8000);
+}
+
+// ─── Sheet 控制 ───────────────────────────────────────────────────────────────
+function openSheet(id) {
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById(id).classList.add('show');
+}
+function closeAllSheets() {
+  document.getElementById('overlay').classList.remove('show');
+  ['itemSheet','confirmSheet'].forEach(id => document.getElementById(id).classList.remove('show'));
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2200);
+}
+</script>
+</body>
+</html>
