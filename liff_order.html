@@ -177,7 +177,7 @@
 
 <script>
 // ─── 設定 ─────────────────────────────────────────────────────────────────────
-const GAS_URL   = 'https://script.google.com/macros/s/AKfycbyzUQxUcUOnuJdXeTadAgcI_KrMySDGau3njsMtxoh4b6A9-66wo1u2__B6KjplaTo7FA/exec'; // ← 換成你的 GAS 部署網址
+const GAS_URL   = 'https://script.google.com/macros/s/AKfycbxtcztvHR0XEvTf-7PGEX-8ETlF69AhyAUYnaMJ8MeqhokJHbFJwOn-EMAYmjyhQayZfg/exec'; // ← 換成你的 GAS 部署網址
 const LIFF_ID   = 'YOUR_LIFF_ID'; // ← 換成你的 LIFF ID
 
 const SUGAR_OPT   = ['全糖','少糖','半糖','微糖','無糖'];
@@ -356,7 +356,7 @@ async function submitOrder() {
       cart = [];
       updateCartBar();
       closeAllSheets();
-      showOrderSuccess(data.orderId, data.total);
+      showOrderSuccess(data.orderId, data.total, data.pickupNumber);
     } else if (data.status === 'soldout') {
       showToast('⚠️ ' + data.error);
     } else {
@@ -370,16 +370,21 @@ async function submitOrder() {
   }
 }
 
-function showOrderSuccess(orderId, total) {
-  document.querySelector('.menu-grid').insertAdjacentHTML('beforebegin', `
-    <div id="successBanner" style="margin:16px;background:#e8f5ef;border-radius:14px;padding:20px;text-align:center">
-      <div style="font-size:36px;margin-bottom:8px">✅</div>
-      <div style="font-weight:700;font-size:16px;color:#2d6a4f">訂單送出成功！</div>
-      <div style="font-size:13px;color:#555;margin-top:4px">訂單編號：${orderId}</div>
-      <div style="font-size:13px;color:#555">金額：$${total}</div>
-      <div style="font-size:12px;color:#888;margin-top:8px">請稍候，店員確認後即開始製作 🧋</div>
+function showOrderSuccess(orderId, total, pickupNumber) {
+  const existing = document.getElementById('successBanner');
+  if (existing) existing.remove();
+  document.querySelector('.section-title').insertAdjacentHTML('beforebegin', `
+    <div id="successBanner" style="margin:16px;background:#e8f5ef;border-radius:16px;padding:24px;text-align:center">
+      <div style="font-size:32px;margin-bottom:8px">✅</div>
+      <div style="font-weight:700;font-size:15px;color:#2d6a4f;margin-bottom:16px">訂單送出成功！</div>
+      ${pickupNumber ? `
+        <div style="font-size:13px;color:#555;margin-bottom:6px">您的取餐號碼</div>
+        <div style="font-size:72px;font-weight:900;color:#2d1a0a;letter-spacing:4px;line-height:1">${pickupNumber}</div>
+        <div style="font-size:12px;color:#888;margin-top:12px">請聽候叫號取餐 🧋</div>
+      ` : ''}
+      <div style="font-size:11px;color:#aaa;margin-top:8px">訂單 ${orderId}・$${total}</div>
     </div>`);
-  setTimeout(() => document.getElementById('successBanner')?.remove(), 8000);
+  setTimeout(() => document.getElementById('successBanner')?.remove(), 30000);
 }
 
 // ─── Sheet 控制 ───────────────────────────────────────────────────────────────
