@@ -96,6 +96,9 @@ button { font-family: inherit; cursor: pointer; }
 .toggle::after { content: ''; position: absolute; width: 14px; height: 14px; background: #fff; border-radius: 50%; top: 3px; left: 3px; transition: .2s; }
 .toggle.on::after { left: 19px; }
 
+/* ── Pickup Number ── */
+.pickup-num { font-size: 40px; font-weight: 900; color: var(--gold); letter-spacing: 3px; text-align: center; padding: 4px 0 6px; line-height: 1; }
+
 /* ── Report Tab ── */
 .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
 .stat-card { background: var(--card); border-radius: var(--radius); padding: 14px 16px; border: 1px solid var(--border); }
@@ -185,7 +188,7 @@ button { font-family: inherit; cursor: pointer; }
 
 <script>
 // ─── 設定 ──────────────────────────────────────────────────────────────────────
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyzUQxUcUOnuJdXeTadAgcI_KrMySDGau3njsMtxoh4b6A9-66wo1u2__B6KjplaTo7FA/exec'; // ← 換成你的 GAS 部署網址
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbxtcztvHR0XEvTf-7PGEX-8ETlF69AhyAUYnaMJ8MeqhokJHbFJwOn-EMAYmjyhQayZfg/exec'; // ← 換成你的 GAS 部署網址
 const POLL_INTERVAL = 4000; // 輪詢間隔（毫秒）
 
 // ─── 狀態 ──────────────────────────────────────────────────────────────────────
@@ -271,11 +274,12 @@ function renderOrders(orders, gridId, showAcceptBtn) {
     const statusLabel = showAcceptBtn ? '待接單' : '製作中';
     return `
     <div class="order-card ${statusClass}">
+      ${o.pickupNumber ? `<div class="pickup-num">${o.pickupNumber}</div>` : ''}
       <div class="meta">
         <div>
-          <div class="order-id">#${o.orderId}</div>
+          <div class="order-id">${o.orderId}</div>
           <div class="customer">${o.name}</div>
-          <div class="time-tag">🕐 ${o.time}</div>
+          <div class="time-tag">🕐 ${typeof o.time === 'string' ? o.time.slice(11,16) : o.time}</div>
         </div>
         <div>
           <div class="total">$${o.total}</div>
