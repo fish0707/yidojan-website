@@ -225,7 +225,12 @@ async function gasPost(body) {
 }
 
 // ─── 輪詢訂單 ──────────────────────────────────────────────────────────────────
+let isPolling = false;      // 防止並發輪詢
+let pendingAction = false;  // 按鈕操作中，暫停自動渲染
+
 async function pollOrders() {
+  if (isPolling) return;
+  isPolling = true;
   try {
     const [pendingData, acceptedData] = await Promise.all([
       gasGet({ action: 'getOrders', status: '待接單' }),
@@ -240,18 +245,22 @@ async function pollOrders() {
     if (newIds.length > 0) { playDing(); newIds.forEach(o => knownOrderIds.add(o.orderId)); }
     pending.forEach(o => knownOrderIds.add(o.orderId));
 
-    renderOrders(pending,  'pendingGrid',  true);
-    renderOrders(accepted, 'acceptedGrid', false);
+    // 按鈕操作中不重建 DOM，避免打斷使用者
+    if (!pendingAction) {
+      smartRenderOrders(pending,  'pendingGrid',  true);
+      smartRenderOrders(accepted, 'acceptedGrid', false);
+    }
 
     setBadge('pendingBadge',  pending.length);
     setBadge('acceptedBadge', accepted.length);
 
-    // 今日統計（輕量讀取）
     const rpt = await gasGet({ action: 'getReport', range: 'today' });
     document.getElementById('todayRevenue').textContent = '$' + (rpt.totalRevenue || 0);
     document.getElementById('todayOrders').textContent  = rpt.totalOrders || 0;
   } catch (e) {
     console.warn('輪詢失敗', e.message);
+  } finally {
+    isPolling = false;
   }
 }
 
@@ -261,54 +270,85 @@ function setBadge(id, count) {
   el.style.display = count > 0 ? 'inline' : 'none';
 }
 
-// ─── 渲染訂單卡 ───────────────────────────────────────────────────────────────
-function renderOrders(orders, gridId, showAcceptBtn) {
+// ─── 智慧渲染：只新增/移除變化的卡片，不重建整個列表 ────────────────────────
+function smartRenderOrders(orders, gridId, showAcceptBtn) {
   const grid = document.getElementById(gridId);
+
+  // 空狀態
   if (orders.length === 0) {
     grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${showAcceptBtn ? '📭' : '☕'}</div><div>${showAcceptBtn ? '目前沒有待接訂單' : '目前沒有製作中訂單'}</div></div>`;
     return;
   }
-  grid.innerHTML = orders.map(o => {
-    const items = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
-    const statusClass = showAcceptBtn ? 'pending' : 'accepted';
-    const statusLabel = showAcceptBtn ? '待接單' : '製作中';
-    return `
-    <div class="order-card ${statusClass}">
-      ${o.pickupNumber ? `<div class="pickup-num">${o.pickupNumber}</div>` : ''}
-      <div class="meta">
-        <div>
-          <div class="order-id">${o.orderId}</div>
-          <div class="customer">${o.name}</div>
-          <div class="time-tag">🕐 ${typeof o.time === 'string' ? o.time.slice(11,16) : o.time}</div>
-        </div>
-        <div>
-          <div class="total">$${o.total}</div>
-          <span class="status-badge ${statusClass}">${statusLabel}</span>
-        </div>
+
+  const newIds     = new Set(orders.map(o => o.orderId));
+  const existingIds = new Set(
+    [...grid.querySelectorAll('.order-card[data-id]')].map(el => el.dataset.id)
+  );
+
+  // 移除已消失的訂單卡
+  grid.querySelectorAll('.order-card[data-id]').forEach(el => {
+    if (!newIds.has(el.dataset.id)) el.remove();
+  });
+
+  // 移除空狀態提示（如果有）
+  grid.querySelector('.empty-state')?.remove();
+
+  // 新增尚未存在的訂單卡
+  orders.forEach(o => {
+    if (!existingIds.has(o.orderId)) {
+      const card = document.createElement('div');
+      card.className = `order-card ${showAcceptBtn ? 'pending' : 'accepted'}`;
+      card.dataset.id = o.orderId;
+      card.innerHTML  = buildCardHTML(o, showAcceptBtn);
+      grid.appendChild(card);
+    }
+  });
+}
+
+function buildCardHTML(o, showAcceptBtn) {
+  const items       = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+  const statusClass = showAcceptBtn ? 'pending' : 'accepted';
+  const statusLabel = showAcceptBtn ? '待接單' : '製作中';
+  const timeStr     = typeof o.time === 'string' ? o.time.slice(11, 16) : String(o.time).slice(11, 16);
+  return `
+    ${o.pickupNumber ? `<div class="pickup-num">${o.pickupNumber}</div>` : ''}
+    <div class="meta">
+      <div>
+        <div class="order-id">${o.orderId}</div>
+        <div class="customer">${o.name}</div>
+        <div class="time-tag">🕐 ${timeStr}</div>
       </div>
-      <div class="items-list">
-        ${items.map(i => `
-          <div class="item-row">
-            <span class="item-name">× ${i.qty} ${i.productId}</span>
-            <span class="item-detail">${i.sugar || ''} / ${i.ice || ''}${(i.toppings || []).length ? ' + ' + i.toppings.join(', ') : ''}</span>
-          </div>`).join('')}
+      <div>
+        <div class="total">$${o.total}</div>
+        <span class="status-badge ${statusClass}">${statusLabel}</span>
       </div>
-      ${o.remark ? `<div class="remark">📝 ${o.remark}</div>` : ''}
-      ${showAcceptBtn
-        ? `<button class="btn-accept" onclick="acceptOrder('${o.orderId}', this)">✓ 確認接單</button>`
-        : `<button class="btn-accept" style="background:var(--blue);color:#fff" onclick="completeOrder('${o.orderId}', this)">✓ 完成取餐</button>`}
-    </div>`;
-  }).join('');
+    </div>
+    <div class="items-list">
+      ${items.map(i => `
+        <div class="item-row">
+          <span class="item-name">× ${i.qty} ${i.productId}</span>
+          <span class="item-detail">${i.sugar || ''} / ${i.ice || ''}${(i.toppings || []).length ? ' + ' + i.toppings.join(', ') : ''}</span>
+        </div>`).join('')}
+    </div>
+    ${o.remark ? `<div class="remark">📝 ${o.remark}</div>` : ''}
+    ${showAcceptBtn
+      ? `<button class="btn-accept" onclick="acceptOrder('${o.orderId}', this)">✓ 確認接單</button>`
+      : `<button class="btn-accept" style="background:var(--blue);color:#fff" onclick="completeOrder('${o.orderId}', this)">✓ 完成取餐</button>`}`;
 }
 
 async function completeOrder(orderId, btn) {
+  pendingAction = true;
   btn.disabled = true;
   btn.textContent = '處理中…';
   try {
     await gasPost({ action: 'updateStatus', orderId, status: '已列印' });
     btn.closest('.order-card').style.opacity = '.4';
-    setTimeout(() => pollOrders(), 500);
+    setTimeout(() => {
+      pendingAction = false;
+      pollOrders();
+    }, 800);
   } catch (e) {
+    pendingAction = false;
     btn.disabled = false;
     btn.textContent = '✓ 完成取餐';
     alert('操作失敗，請重試');
@@ -316,13 +356,18 @@ async function completeOrder(orderId, btn) {
 }
 
 async function acceptOrder(orderId, btn) {
+  pendingAction = true;
   btn.disabled = true;
   btn.textContent = '處理中…';
   try {
     await gasPost({ action: 'updateStatus', orderId, status: '已接單' });
     btn.closest('.order-card').style.opacity = '.4';
-    setTimeout(() => pollOrders(), 500);
+    setTimeout(() => {
+      pendingAction = false;
+      pollOrders();
+    }, 800);
   } catch (e) {
+    pendingAction = false;
     btn.disabled = false;
     btn.textContent = '✓ 確認接單';
     alert('操作失敗，請重試');
