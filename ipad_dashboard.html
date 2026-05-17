@@ -290,9 +290,25 @@ function renderOrders(orders, gridId, showAcceptBtn) {
           </div>`).join('')}
       </div>
       ${o.remark ? `<div class="remark">📝 ${o.remark}</div>` : ''}
-      ${showAcceptBtn ? `<button class="btn-accept" onclick="acceptOrder('${o.orderId}', this)">✓ 確認接單</button>` : ''}
+      ${showAcceptBtn
+        ? `<button class="btn-accept" onclick="acceptOrder('${o.orderId}', this)">✓ 確認接單</button>`
+        : `<button class="btn-accept" style="background:var(--blue);color:#fff" onclick="completeOrder('${o.orderId}', this)">✓ 完成取餐</button>`}
     </div>`;
   }).join('');
+}
+
+async function completeOrder(orderId, btn) {
+  btn.disabled = true;
+  btn.textContent = '處理中…';
+  try {
+    await gasPost({ action: 'updateStatus', orderId, status: '已列印' });
+    btn.closest('.order-card').style.opacity = '.4';
+    setTimeout(() => pollOrders(), 500);
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '✓ 完成取餐';
+    alert('操作失敗，請重試');
+  }
 }
 
 async function acceptOrder(orderId, btn) {
