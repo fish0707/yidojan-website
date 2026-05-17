@@ -38,6 +38,7 @@
   }
   .menu-card:active { transform: scale(.97); }
   .menu-card.sold-out { opacity: .5; cursor: not-allowed; }
+  .menu-card .thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; margin-bottom: 8px; }
   .menu-card .emoji { font-size: 30px; margin-bottom: 8px; display: block; }
   .menu-card .name { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
   .menu-card .price { font-size: 16px; font-weight: 700; color: var(--brown); }
@@ -231,7 +232,10 @@ function renderMenu() {
   const grid = document.getElementById('menuGrid');
   grid.innerHTML = menu.map(p => `
     <div class="menu-card ${p.available ? '' : 'sold-out'}" onclick="${p.available ? `openItemSheet('${p.id}')` : ''}">
-      <span class="emoji">${p.emoji || '🧋'}</span>
+      ${p.imageUrl
+        ? `<img class="thumb" src="${p.imageUrl}" alt="${p.name}" onerror="this.style.display='none';this.nextSibling.style.display='block'">`
+        : ''}
+      <span class="emoji" style="${p.imageUrl ? 'display:none' : ''}">${p.emoji || '🧋'}</span>
       <div class="name">${p.name}</div>
       <div class="price">$${p.price}</div>
       ${!p.available ? '<div class="badge">售完</div>' : ''}
