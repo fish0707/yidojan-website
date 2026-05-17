@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>後台管理</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f5f0eb; --surface: #fff; --brown: #6b3a2a; --brown-light: #c8956a;
+  --green: #2d6a4f; --red: #c0392b; --text: #1a1208; --muted: #9e8c7e;
+  --border: #e0d5cc; --radius: 12px;
+}
+body { font-family: 'Noto Sans TC', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+.topbar { background: var(--brown); color: #f5deb3; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; }
+.topbar h1 { font-size: 17px; font-weight: 700; }
+.topbar .sub { font-size: 12px; color: #c4a882; }
+
+.container { max-width: 900px; margin: 0 auto; padding: 20px 16px; }
+
+/* ── 說明區 ── */
+.info-box { background: #fff8e6; border: 1px solid #f5c842; border-radius: var(--radius); padding: 14px 16px; margin-bottom: 20px; font-size: 13px; line-height: 1.7; color: #7a5a00; }
+.info-box strong { display: block; margin-bottom: 4px; font-size: 14px; }
+
+/* ── 品項列表 ── */
+.section-title { font-size: 14px; font-weight: 700; color: var(--muted); margin-bottom: 12px; letter-spacing: 1px; text-transform: uppercase; }
+.item-list { display: flex; flex-direction: column; gap: 10px; }
+.item-row {
+  background: var(--surface); border-radius: var(--radius); padding: 14px 16px;
+  border: 1.5px solid var(--border); display: flex; align-items: center; gap: 14px;
+}
+.item-row.unavailable { opacity: .55; }
+
+/* 圖片預覽 */
+.thumb-wrap { width: 64px; height: 64px; border-radius: 10px; overflow: hidden; background: var(--bg); border: 1.5px dashed var(--border); flex-shrink: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: border-color .15s; position: relative; }
+.thumb-wrap:hover { border-color: var(--brown-light); }
+.thumb-wrap img { width: 100%; height: 100%; object-fit: cover; }
+.thumb-wrap .emoji-placeholder { font-size: 28px; }
+.thumb-wrap .upload-hint { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,.5); color: #fff; font-size: 10px; text-align: center; padding: 3px 0; opacity: 0; transition: .15s; }
+.thumb-wrap:hover .upload-hint { opacity: 1; }
+input[type=file] { display: none; }
+
+/* 品項資訊 */
+.item-info { flex: 1; }
+.item-info .name { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+.item-info .price { font-size: 14px; color: var(--brown); font-weight: 600; }
+.item-info .pid { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* 狀態切換 */
+.toggle-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.toggle-label { font-size: 11px; color: var(--muted); }
+.toggle { width: 40px; height: 22px; background: var(--border); border-radius: 99px; position: relative; cursor: pointer; border: none; transition: .2s; }
+.toggle.on { background: var(--green); }
+.toggle::after { content: ''; position: absolute; width: 16px; height: 16px; background: #fff; border-radius: 50%; top: 3px; left: 3px; transition: .2s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.toggle.on::after { left: 21px; }
+
+/* 上傳進度 */
+.upload-status { font-size: 11px; margin-top: 4px; min-height: 16px; }
+.upload-status.uploading { color: var(--brown-light); }
+.upload-status.done { color: var(--green); }
+.upload-status.error { color: var(--red); }
+
+/* Toast */
+.toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%) translateY(-8px); background: var(--text); color: #fff; padding: 9px 20px; border-radius: 99px; font-size: 13px; opacity: 0; transition: .25s; pointer-events: none; z-index: 200; white-space: nowrap; }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* Loading */
+.loading { text-align: center; padding: 40px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <h1>⚙️ 後台管理</h1>
+    <div class="sub">一門棧飲料店</div>
+  </div>
+  <a href="ipad_dashboard.html" style="color:#f5deb3;font-size:13px">← 回看板</a>
+</div>
+
+<div class="container">
+
+  <div class="info-box">
+    <strong>📸 如何上傳飲料圖片</strong>
+    點擊品項左側的圖片區域，選擇本機圖片（建議尺寸 400x400px 以上）。<br>
+    圖片會上傳至 Google Drive 並自動套用到點餐頁，無需重新整理。<br>
+    也可以直接切換「上架/下架」開關，即時生效。
+  </div>
+
+  <div class="section-title">品項管理（共 <span id="totalCount">-</span> 項）</div>
+  <div class="item-list" id="itemList">
+    <div class="loading">載入中…</div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbxtcztvHR0XEvTf-7PGEX-8ETlF69AhyAUYnaMJ8MeqhokJHbFJwOn-EMAYmjyhQayZfg/exec';
+
+let menuItems = [];
+
+// ─── 載入菜單 ──────────────────────────────────────────────────────────────────
+async function loadMenu() {
+  try {
+    const res  = await fetch(`${GAS_URL}?action=getMenu`);
+    const data = await res.json();
+    menuItems = data.menu || [];
+    document.getElementById('totalCount').textContent = menuItems.length;
+    renderList();
+  } catch (e) {
+    document.getElementById('itemList').innerHTML = '<div class="loading">載入失敗，請重新整理</div>';
+  }
+}
+
+// ─── 渲染品項列表 ──────────────────────────────────────────────────────────────
+function renderList() {
+  const list = document.getElementById('itemList');
+  list.innerHTML = menuItems.map(item => `
+    <div class="item-row ${item.available ? '' : 'unavailable'}" id="row-${item.id}">
+
+      <!-- 圖片上傳區 -->
+      <div class="thumb-wrap" onclick="document.getElementById('file-${item.id}').click()">
+        ${item.imageUrl
+          ? `<img src="${item.imageUrl}" alt="${item.name}" onerror="this.src=''">` 
+          : `<span class="emoji-placeholder">${item.emoji || '🧋'}</span>`}
+        <div class="upload-hint">點擊上傳</div>
+      </div>
+      <input type="file" id="file-${item.id}" accept="image/*" onchange="handleUpload('${item.id}', this)">
+
+      <!-- 品項資訊 -->
+      <div class="item-info">
+        <div class="name">${item.name}</div>
+        <div class="price">$${item.price}</div>
+        <div class="pid">${item.id}</div>
+        <div class="upload-status" id="status-${item.id}"></div>
+      </div>
+
+      <!-- 上架/下架 -->
+      <div class="toggle-wrap">
+        <div class="toggle-label">${item.available ? '上架中' : '已下架'}</div>
+        <button class="toggle ${item.available ? 'on' : ''}" id="toggle-${item.id}"
+          onclick="toggleAvailable('${item.id}', ${!item.available}, this)"></button>
+      </div>
+
+    </div>
+  `).join('');
+}
+
+// ─── 切換上下架 ────────────────────────────────────────────────────────────────
+async function toggleAvailable(productId, newValue, btn) {
+  btn.disabled = true;
+  try {
+    const res  = await fetch(`${GAS_URL}?action=toggleProduct&productId=${productId}&available=${newValue}`);
+    const data = await res.json();
+    if (data.status === 'success') {
+      btn.classList.toggle('on', newValue);
+      const label = btn.previousElementSibling;
+      label.textContent = newValue ? '上架中' : '已下架';
+      const row = document.getElementById(`row-${productId}`);
+      row.classList.toggle('unavailable', !newValue);
+      // 更新本地資料
+      const item = menuItems.find(i => i.id === productId);
+      if (item) item.available = newValue;
+      showToast(newValue ? '已上架' : '已下架');
+    }
+  } catch (e) {
+    showToast('操作失敗，請重試');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ─── 圖片上傳 ──────────────────────────────────────────────────────────────────
+async function handleUpload(productId, input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  // 檔案大小限制 5MB
+  if (file.size > 5 * 1024 * 1024) {
+    showToast('圖片不能超過 5MB');
+    return;
+  }
+
+  const statusEl = document.getElementById(`status-${productId}`);
+  statusEl.className = 'upload-status uploading';
+  statusEl.textContent = '上傳中…';
+
+  try {
+    // 轉 base64
+    const base64 = await toBase64(file);
+    const mimeType = file.type;
+
+    // 送到 GAS 上傳到 Google Drive
+    const res = await fetch(GAS_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action:    'uploadImage',
+        productId,
+        fileName:  `${productId}_${Date.now()}.${file.name.split('.').pop()}`,
+        mimeType,
+        base64Data: base64.split(',')[1], // 去掉 data:image/xxx;base64, 前綴
+      }),
+    });
+    const data = await res.json();
+
+    if (data.status === 'success') {
+      // 更新預覽圖
+      const thumbWrap = document.querySelector(`#row-${productId} .thumb-wrap`);
+      thumbWrap.innerHTML = `
+        <img src="${data.imageUrl}" alt="">
+        <div class="upload-hint">點擊上傳</div>`;
+
+      statusEl.className = 'upload-status done';
+      statusEl.textContent = '✓ 上傳成功';
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+
+      const item = menuItems.find(i => i.id === productId);
+      if (item) item.imageUrl = data.imageUrl;
+      showToast(`${item?.name || ''} 圖片已更新`);
+    } else {
+      throw new Error(data.error || '上傳失敗');
+    }
+  } catch (e) {
+    statusEl.className = 'upload-status error';
+    statusEl.textContent = '上傳失敗：' + e.message;
+  }
+
+  input.value = ''; // 重設 input 讓同一張圖可以重傳
+}
+
+function toBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// ─── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+loadMenu();
+</script>
+</body>
+</html>
