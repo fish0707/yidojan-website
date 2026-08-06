@@ -11,7 +11,7 @@
 | `lunch_admin.html` | 主揪頁：開單、收單、彙整、菜單維護、歷史 |
 | `lunch.js` | 兩頁共用的 API 與工具函式，`GAS_URL` 也在這裡 |
 | `gas/lunch_Code.gs` | 後端程式碼，貼進 Apps Script 編輯器 |
-| `gas/appsscript.json` | 資訊清單，宣告需要的 OAuth 權限範圍 |
+| `gas/appsscript.json` | 資訊清單（選用），設定時區與網頁應用程式參數 |
 
 ## 部署步驟
 
@@ -43,7 +43,7 @@ Apps Script 的權限是**依「程式碼用到哪些 Google 服務」決定的*
 
 | 服務 | 用途 | 權限範圍 |
 |---|---|---|
-| `SpreadsheetApp` | 讀寫訂單與菜單 | `spreadsheets.currentonly` |
+| `SpreadsheetApp` | 讀寫訂單與菜單 | `spreadsheets` |
 | `UrlFetchApp` | 呼叫 Gemini 辨識菜單 | `script.external_request` |
 | `DriveApp` | 儲存菜單 DM 原圖 | `drive` |
 
@@ -61,14 +61,16 @@ API key 是否有效、**你的金鑰實際可用的模型清單**，最後實�
 > **每次貼上新版程式碼、或新增用到新的 Google 服務，都要重跑一次這支函式**，
 > 然後再重新部署。
 
-### 更新 `appsscript.json`（選用但建議）
+### 關於 `appsscript.json`
 
-編輯器預設不顯示這個檔案。到「**專案設定**」勾選
-「**顯示 appsscript.json 資訊清單檔案**」，就會出現在左側檔案列表，
-把 `gas/appsscript.json` 的內容貼進去。
+這個檔案**刻意不列 `oauthScopes`**，讓 Apps Script 依程式碼自動推斷需要哪些權限。
 
-好處是需要的權限寫得明明白白，不必依賴 Apps Script 自動推斷，
-換一台電腦或重建專案時也能一致重現。
+自己手寫權限清單看似嚴謹，實際上是個陷阱：一旦寫了，Apps Script 就停止自動偵測、
+只認你列的那幾項，日後程式碼多用了一個服務就會在執行時被擋，而且**不會跳同意畫面**
+（因為它認為清單裡的權限都拿到了），很難查。交給自動偵測反而穩。
+
+這個檔案是選用的。要用的話到「**專案設定**」勾選
+「**顯示 appsscript.json 資訊清單檔案**」再貼上。
 
 ## 菜單 DM 辨識（選用）
 
@@ -109,8 +111,11 @@ API key 是否有效、**你的金鑰實際可用的模型清單**，最後實�
 
 ### 模型設定
 
-預設模型寫在 `lunch_Code.gs` 的 `GEMINI_MODEL_DEFAULT`，但**可以用指令碼屬性
-`GEMINI_MODEL` 覆蓋**（不用改程式碼、不用重新部署）。
+預設模型寫在 `lunch_Code.gs` 的 `GEMINI_MODEL_DEFAULT`（目前是 `gemini-3.5-flash`），
+但**可以用指令碼屬性 `GEMINI_MODEL` 覆蓋**（不用改程式碼、不用重新部署）。
+
+熱門的舊模型（例如 `gemini-2.5-flash`）常常回 503「high demand」。
+程式碰到 5xx 會自動重試 3 次並遞增退避，但如果某個模型持續壅塞，換一個比較快。
 
 Google 會汰換模型名稱，所以不要靠猜的 —— 執行 `authorizeAndSelfTest`，
 執行紀錄會列出**你的金鑰當下實際可用的模型**，挑一個 flash 系列填進
@@ -168,7 +173,8 @@ Google 會汰換模型名稱，所以不要靠猜的 —— 執行 `authorizeAnd
 
 回傳格式：成功 `{status:'success', ...}`，失敗 `{status:'error', code, error}`。
 常見錯誤碼：`CLOSED`（已停止收單）、`FORBIDDEN`（不是你的訂單）、`BUSY`（同時寫入衝突，請重試）、
-`NO_API_KEY`（沒設 `GEMINI_API_KEY`）、`RATE_LIMIT`（免費額度用完）、`NO_ITEMS`（這張圖沒讀到品項）。
+`NO_API_KEY`（沒設 `GEMINI_API_KEY`）、`RATE_LIMIT`（額度用完）、`NO_ITEMS`（這張圖沒讀到品項）、
+`NEED_AUTH`（Apps Script 授權不足）、`BAD_MODEL`（模型不存在）、`MODEL_BUSY`（模型壅塞，已重試過）。
 
 ## 幾個設計上的注意事項
 
@@ -184,6 +190,8 @@ Google 會汰換模型名稱，所以不要靠猜的 —— 執行 `authorizeAnd
 - **`parseMenuImage` 刻意不包在 `LockService` 裡**。它要跑十幾秒，佔著全域鎖會讓正在送單的
   同事全部卡住；它也不寫試算表，真正落地是使用者按下確認後的 `applyParsedMenu`。
 - **辨識結果不被信任**。後端會再過濾一次空名稱、負數與超過上限的價格，前端還有一道人工確認。
+- **只重試 5xx**。503「high demand」是 Google 端的瞬間壅塞，自動重試 3 次多半就過了；
+  429 是額度問題，重試只會更糟，所以不retry。
 
 ## 疑難排解
 
@@ -195,6 +203,8 @@ Google 會汰換模型名稱，所以不要靠猜的 —— 執行 `authorizeAnd
 | 還沒設定 GEMINI_API_KEY | 沒建立指令碼屬性 | 到「專案設定 → 指令碼屬性」新增 |
 | GEMINI_API_KEY 無效或未啟用 | key 打錯，或該 Google 專案沒啟用 Generative Language API | 到 AI Studio 重新產生一組 |
 | 辨識額度用完了 | 碰到免費方案的每分鐘／每日上限 | 等一下再試 |
+| 模型「…」現在太忙（503） | Google 那端瞬間壅塞，**不是你的設定問題**。程式已自動重試 3 次 | 過幾分鐘再試；經常發生就換一個模型 |
+| 執行 `authorizeAndSelfTest` 沒跳出同意畫面 | 多半是瀏覽器擋掉彈出視窗，或該次剛好沒觸發 | 允許 script.google.com 的彈出視窗，重新整理編輯器再執行一次 |
 | 不支援的 action：parseMenuImage | 程式碼貼了但沒重新部署 | 部署 → 管理部署作業 → 編輯 → 版本選「新版本」 |
 | 已套用品項，但原圖沒存成功 | 菜單有寫進去，只是 Drive 權限不足 | 執行 `authorizeAndSelfTest`；不修也不影響點餐 |
 

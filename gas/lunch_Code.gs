@@ -30,7 +30,7 @@ var MAX_PRICE = 100000;
 // 絕對不要寫在這裡，也不要寫進前端 —— repo 和網站都是公開的。
 // 模型可用指令碼屬性 GEMINI_MODEL 覆蓋，Google 換名字時不用重貼程式碼、不用重新部署。
 // 你的金鑰實際支援哪些模型，執行 authorizeAndSelfTest 就會列出來。
-var GEMINI_MODEL_DEFAULT = 'gemini-2.5-flash';
+var GEMINI_MODEL_DEFAULT = 'gemini-3.5-flash';
 var GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 var MAX_IMAGE_BYTES = 6 * 1024 * 1024;   // 前端會先壓縮，這是保險
 var MAX_PARSED_ITEMS = 120;
@@ -61,6 +61,43 @@ function isAuthError_(message) {
 
 var AUTH_HINT = '指令碼還沒取得對外連線／Drive 的權限。'
   + '請到 Apps Script 編輯器執行一次 authorizeAndSelfTest 完成授權，再重新部署。';
+
+var GEMINI_MAX_ATTEMPTS = 3;
+
+/**
+ * 呼叫 Gemini，遇到暫時性故障就重試。
+ *
+ * 503 UNAVAILABLE（「This model is currently experiencing high demand」）是
+ * Google 那端的瞬間壅塞，跟金鑰、額度、設定都無關，通常等幾秒就好了。
+ * 直接把它當錯誤丟回去很浪費——使用者要重新選一次圖、重等一次辨識。
+ *
+ * 只重試伺服器端的暫時性錯誤（5xx）。429 是額度問題，重試只會更糟，不retry。
+ */
+function callGeminiWithRetry_(url, payload) {
+  var last = null;
+
+  for (var i = 0; i < GEMINI_MAX_ATTEMPTS; i++) {
+    if (i > 0) Utilities.sleep(1500 * i);   // 1.5s、3s
+
+    var res;
+    try {
+      res = UrlFetchApp.fetch(url, {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify(payload),
+        muteHttpExceptions: true
+      });
+    } catch (ex) {
+      // 授權不足會在這裡爆，而且請求根本沒送出去，重試沒有意義
+      if (isAuthError_(ex.message)) return { authError: true };
+      return { exception: ex.message };
+    }
+
+    last = { code: res.getResponseCode(), text: res.getContentText() };
+    if (last.code < 500) return last;       // 成功或明確的用戶端錯誤，不必重試
+  }
+  return last;
+}
 
 // ─── 入口 ─────────────────────────────────────────────────────────────────────
 function doGet(e) {
@@ -882,23 +919,19 @@ function parseMenuImage_(body) {
   };
 
   var url = GEMINI_API_BASE + '/' + model + ':generateContent?key=' + encodeURIComponent(key);
-  var res;
-  try {
-    res = UrlFetchApp.fetch(url, {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify(payload),
-      muteHttpExceptions: true
-    });
-  } catch (ex) {
-    // 授權不足會在這裡爆，而且請求根本沒送出去 —— 不要讓使用者誤以為是額度或計費問題
-    if (isAuthError_(ex.message)) return err('NEED_AUTH', AUTH_HINT);
-    return err('UPSTREAM', '呼叫辨識服務失敗：' + ex.message);
+  var attempt = callGeminiWithRetry_(url, payload);
+
+  if (attempt.authError) return err('NEED_AUTH', AUTH_HINT);
+  if (attempt.exception) return err('UPSTREAM', '呼叫辨識服務失敗：' + attempt.exception);
+
+  var code = attempt.code;
+  var text = attempt.text;
+
+  if (code === 503 || text.indexOf('UNAVAILABLE') !== -1) {
+    return err('MODEL_BUSY', '模型「' + model + '」現在太忙（已自動重試 '
+      + GEMINI_MAX_ATTEMPTS + ' 次）。請稍等一下再試一次；'
+      + '如果經常這樣，可用指令碼屬性 GEMINI_MODEL 換一個模型。');
   }
-
-  var code = res.getResponseCode();
-  var text = res.getContentText();
-
   if (code === 429) return err('RATE_LIMIT', '辨識額度用完了（每分鐘或每日上限），等一下或明天再試');
   if (code === 403 || (code === 400 && text.indexOf('API_KEY_INVALID') !== -1)) {
     return err('BAD_API_KEY', 'GEMINI_API_KEY 無效或未啟用，請重新產生一組並更新指令碼屬性');
@@ -1138,17 +1171,21 @@ function authorizeAndSelfTest() {
   var tiny = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
   var probe = parseMenuImage_({ base64Data: tiny, mimeType: 'image/png' });
 
-  if (probe.status === 'success') {
-    say('✅ 辨識管線正常（測試圖沒有品項是預期的）');
-  } else if (probe.code === 'NO_ITEMS') {
+  if (probe.status === 'success' || probe.code === 'NO_ITEMS') {
     // 1x1 空白圖讀不到品項才是對的 —— 代表請求有送到、也有正常回應
     say('✅ 辨識管線正常（測試圖是空白的，讀不到品項屬預期結果）');
+  } else if (probe.code === 'MODEL_BUSY') {
+    // Google 那端瞬間壅塞，不是設定問題，不要嚇到使用者
+    say('⚠️  模型現在忙碌中（503），這是 Google 端的暫時壅塞，設定本身沒問題。');
+    say('   → 過幾分鐘再跑一次；經常這樣的話換一個模型。');
+    var alt = pickFlashModel_(models.list.filter(function (n) { return n !== model; }));
+    if (alt) say('   → 可以改用：GEMINI_MODEL = ' + alt);
   } else {
     say('❌ 辨識失敗：[' + probe.code + '] ' + probe.error);
   }
 
   say('=== 檢測結束 ===');
-  say('若上面全是 ✅，請到「部署 → 管理部署作業 → 編輯 → 版本選新版本 → 部署」再回網頁測試。');
+  say('沒有 ❌ 的話，請到「部署 → 管理部署作業 → 編輯 → 版本選新版本 → 部署」再回網頁測試。');
   return log.join('\n');
 }
 
@@ -1179,24 +1216,43 @@ function listAvailableModels_(key) {
   return { list: list };
 }
 
-/** 從可用清單裡挑一個適合的 flash 模型（便宜、快、免費方案通常留著它） */
+/**
+ * 從可用清單裡挑一個適合讀菜單的 flash 模型。
+ *
+ * 不能只做字串排序：'gemini-flash-lite-latest' 的字母序會排在
+ * 'gemini-3.6-flash' 後面，結果挑到 lite 版本。這裡改成看版本號，
+ * 並且明確偏好非 lite 的正規 flash。
+ */
 function pickFlashModel_(list) {
-  var flash = list.filter(function (n) {
+  var candidates = list.filter(function (n) {
     return n.indexOf('flash') !== -1
         && n.indexOf('thinking') === -1
-        && n.indexOf('image') === -1
+        && n.indexOf('image') === -1     // 生圖模型，不是拿來讀圖的
         && n.indexOf('tts') === -1
-        && n.indexOf('live') === -1;
+        && n.indexOf('live') === -1
+        && n.indexOf('omni') === -1
+        && n.indexOf('robotics') === -1;
   });
-  if (!flash.length) return list[0] || '';
+  if (!candidates.length) return '';
 
-  // preview / exp 的版本會被下架，優先挑穩定版；再來挑名字最「新」的
-  var stable = flash.filter(function (n) {
-    return n.indexOf('preview') === -1 && n.indexOf('exp') === -1;
-  });
-  var pool = stable.length ? stable : flash;
-  pool.sort();
-  return pool[pool.length - 1];
+  function score(n) {
+    var s = 0;
+    // 穩定版優先：preview / exp 隨時會被下架
+    if (n.indexOf('preview') === -1 && n.indexOf('exp') === -1) s += 10000;
+    // 正規版優先於 lite（lite 讀密密麻麻的菜單比較吃力）
+    if (n.indexOf('lite') === -1) s += 5000;
+    // 版本號越新越好；'latest' 這種別名給一個中等分數，它會自動跟著更新
+    var m = n.match(/(\d+)(?:\.(\d+))?/);
+    if (m) s += parseInt(m[1], 10) * 100 + (m[2] ? parseInt(m[2], 10) : 0);
+    else if (n.indexOf('latest') !== -1) s += 250;
+    return s;
+  }
+
+  var best = candidates[0];
+  for (var i = 1; i < candidates.length; i++) {
+    if (score(candidates[i]) > score(best)) best = candidates[i];
+  }
+  return best;
 }
 
 // ─── 首次安裝：建立四張工作表與範例資料 ───────────────────────────────────────
