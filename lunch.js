@@ -3,7 +3,8 @@
  * lunch.html 與 lunch_admin.html 都會載入這支。
  */
 
-// ⚠️ 部署 gas/lunch_Code.gs 之後，把下面這行換成你的 Web App 網址
+// 午餐訂單專用的 GAS 部署網址（與飲料店那組是不同的試算表與部署，不要混用）
+// 之後在 Apps Script 重新部署時若產生了新網址，記得回來換這一行
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbz9haHSLuwnAbzA4qBFY8dayuUooiStARUSwjA-XvsPuKmauSHqCLrfRTDYBOlLZHwX1w/exec';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
