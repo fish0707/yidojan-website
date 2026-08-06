@@ -277,7 +277,7 @@ async function init() {
     renderHero();
     render();
 
-    if (state.session) setInterval(poll, POLL_INTERVAL);
+    if (state.session) startPolling();
   } catch (e) {
     document.getElementById('loading').innerHTML =
       '載入失敗：' + esc(e.message) + '<br><br><button onclick="location.reload()">重新整理</button>';
@@ -293,6 +293,33 @@ function detectMyOrder() {
 }
 
 // ─── 輪詢 ─────────────────────────────────────────────────────────────────────
+//
+// 用「跑完一輪再排下一輪」而不是 setInterval：後端偶爾會慢到好幾秒，
+// 固定間隔會讓請求開始重疊、在 Apps Script 那邊堆成一排執行中。
+
+let pollTimer = null;
+
+function pollDelay() {
+  // 沒人在看的分頁不需要即時：切到背景就把頻率降下來
+  if (document.hidden) return 60000;
+  // 已經收單了就不會再變，沒必要一直問
+  if (!isOpen()) return 30000;
+  return POLL_INTERVAL;
+}
+
+function startPolling() {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async function loop() {
+    await poll();
+    pollTimer = setTimeout(loop, pollDelay());
+  }, pollDelay());
+}
+
+// 切回前景時立刻補一次，不用等下一輪，看起來才即時
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.session) { poll(); startPolling(); }
+});
+
 async function poll() {
   if (isPolling || isBusy || !state.session) return;
   isPolling = true;

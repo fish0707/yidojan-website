@@ -172,8 +172,71 @@ function withLock_(fn) {
   try {
     return fn();
   } finally {
+    // 先讓輪詢快取失效，再放鎖。順序反過來的話，會有一小段時間別人拿到舊資料。
+    bumpGeneration_();
     lock.releaseLock();
   }
+}
+
+// ─── 輪詢快取 ─────────────────────────────────────────────────────────────────
+//
+// 絕大多數的輪詢，答案都是「沒有變化」。原本為了得到這個答案，每次都要開試算表、
+// 掃過整張 Sessions（getDataRange 會把開站至今的每一列都撈出來）。人一多就變成
+// 每 8 秒好幾個請求、每個 1〜5 秒，於是互相重疊、堆成一排「執行中」。
+//
+// 這裡把「這場的目前狀態」放進 CacheService，沒變化的輪詢就完全不碰試算表。
+
+var POLL_CACHE_TTL_SEC = 25;   // 安全網：萬一失效沒生效，最多也只慢這麼久
+var GEN_KEY = 'lunch:gen';
+var GEN_TTL_SEC = 21600;       // 6 小時，CacheService 的上限
+
+function cache_() { return CacheService.getScriptCache(); }
+
+/**
+ * 資料世代編號：任何一次寫入都會換一個新值。
+ *
+ * 輪詢快取的 key 帶著這個編號，所以世代一換，所有舊快取自動失效。
+ * 這比「在每個寫入函式裡記得清掉對應的 key」可靠得多——那種寫法只要
+ * 日後新增一個寫入路徑忘了清，使用者就會看到舊資料，而且極難查。
+ */
+function generation_() {
+  try {
+    var g = cache_().get(GEN_KEY);
+    if (!g) {
+      g = String(Date.now());
+      cache_().put(GEN_KEY, g, GEN_TTL_SEC);
+    }
+    return g;
+  } catch (ex) {
+    return '';   // 快取服務有狀況就一律走慢路徑：寧可慢，也不要給錯的資料
+  }
+}
+
+function bumpGeneration_() {
+  try {
+    cache_().put(GEN_KEY, Date.now() + '_' + Math.random(), GEN_TTL_SEC);
+  } catch (ex) { /* 清不掉就算了，TTL 會兜底 */ }
+}
+
+function pollCacheKey_(sessionId) {
+  var g = generation_();
+  return g ? 'lunch:poll:' + g + ':' + sessionId : '';
+}
+
+function pollCacheGet_(sessionId) {
+  try {
+    var k = pollCacheKey_(sessionId);
+    if (!k) return null;
+    var raw = cache_().get(k);
+    return raw ? JSON.parse(raw) : null;
+  } catch (ex) { return null; }
+}
+
+function pollCachePut_(sessionId, payload) {
+  try {
+    var k = pollCacheKey_(sessionId);
+    if (k) cache_().put(k, JSON.stringify(payload), POLL_CACHE_TTL_SEC);
+  } catch (ex) { /* 存不進去只是少了加速，不影響正確性 */ }
 }
 
 function ss_() {
@@ -181,15 +244,29 @@ function ss_() {
 }
 
 /** 取得工作表，不存在就依 HEADERS 建立；已存在但缺欄位就補上 */
+/**
+ * 同一次執行裡重複拿同一張工作表時，不要重跑 getSheetByName 與 ensureHeaders_。
+ *
+ * 每個 GAS 請求都是全新的執行環境，所以這個 cache 不會跨請求殘留，
+ * 也就不會有「別人改了試算表但我還拿到舊的」的問題。
+ */
+var _sheetCache = {};
+
+/** 只有測試會用到：模擬「下一個請求是全新的執行環境」 */
+function resetSheetCache_() { _sheetCache = {}; }
+
 function sheet_(name) {
+  if (_sheetCache[name]) return _sheetCache[name];
+
   var s = ss_().getSheetByName(name);
   if (!s) {
     s = ss_().insertSheet(name);
     s.appendRow(HEADERS[name]);
     s.setFrozenRows(1);
-    return s;
+  } else {
+    ensureHeaders_(s, name);
   }
-  ensureHeaders_(s, name);
+  _sheetCache[name] = s;
   return s;
 }
 
@@ -720,13 +797,27 @@ function getSession_(params) {
 
 /** 輕量輪詢：rev 沒變就不回傳訂單，省流量也讓前端知道不用重繪 */
 function poll_(params) {
-  var session = findSession_(clean_(params.sessionId, 64));
+  var sessionId = clean_(params.sessionId, 64);
+  var clientRev = toInt_(params.rev, -1);
+
+  // 快路徑：手上的 rev 跟快取一致，代表沒有任何人寫入過，直接回覆，不開試算表。
+  // 唯一的例外是已經過了截止時間——那要走慢路徑，讓後端真的把場次關掉。
+  var cached = pollCacheGet_(sessionId);
+  if (cached && toInt_(cached.rev, -1) === clientRev && clientRev >= 0
+      && !(cached.status === 'open' && toMillis_(cached.closeAt) <= Date.now())) {
+    return {
+      status: 'success', serverNow: Date.now(),
+      rev: cached.rev, changed: false, session: cached
+    };
+  }
+
+  var session = findSession_(sessionId);
   if (!session) return err('NOT_FOUND', '找不到這場訂單');
 
   sessionOpen_(session);
-  var rev       = toInt_(session.rev, 0);
-  var clientRev = toInt_(params.rev, -1);
-  var payload   = sessionPayload_(session);
+  var rev     = toInt_(session.rev, 0);
+  var payload = sessionPayload_(session);
+  pollCachePut_(sessionId, payload);
 
   if (clientRev === rev) {
     return { status: 'success', serverNow: Date.now(), rev: rev, changed: false, session: payload };

@@ -225,8 +225,30 @@ async function init() {
   await loadRestaurants();
   await loadSession();
   renderMenuTab();
-  setInterval(poll, POLL_INTERVAL);
+  startPolling();
 }
+
+// 用「跑完一輪再排下一輪」而不是 setInterval：後端偶爾會慢到好幾秒，
+// 固定間隔會讓請求開始重疊、在 Apps Script 那邊堆成一排執行中。
+let pollTimer = null;
+
+function pollDelay() {
+  if (document.hidden) return 60000;                                    // 沒人在看
+  if (!state.session || state.session.status !== 'open') return 30000;  // 沒在收單
+  return POLL_INTERVAL;
+}
+
+function startPolling() {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async function loop() {
+    await poll();
+    pollTimer = setTimeout(loop, pollDelay());
+  }, pollDelay());
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { poll(); startPolling(); }
+});
 
 // ─── 載入 ─────────────────────────────────────────────────────────────────────
 async function loadSession() {
