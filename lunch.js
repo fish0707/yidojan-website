@@ -4,7 +4,7 @@
  */
 
 // ⚠️ 部署 gas/lunch_Code.gs 之後，把下面這行換成你的 Web App 網址
-const GAS_URL = 'https://script.google.com/macros/s/PASTE_YOUR_LUNCH_DEPLOYMENT_ID_HERE/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbz9haHSLuwnAbzA4qBFY8dayuUooiStARUSwjA-XvsPuKmauSHqCLrfRTDYBOlLZHwX1w/exec';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 async function gasGet(params) {
