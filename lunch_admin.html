@@ -963,7 +963,13 @@ async function applyScan() {
     state.scan = null;
     renderMenuTab();
     renderSessionTab();
-    showToast(`已套用 ${items.length} 個品項到「${data.restaurant.name}」`);
+
+    // 菜單有寫進去、只是原圖沒存成 —— 要講清楚是哪一半失敗，不要讓人以為整件事壞了
+    if (data.imageWarning) {
+      showToast(`已套用 ${items.length} 個品項，但原圖沒存成功：${data.imageWarning}`, true);
+    } else {
+      showToast(`已套用 ${items.length} 個品項到「${data.restaurant.name}」`);
+    }
   } catch (e) {
     showToast(e.message || '套用失敗，請重試', true);
     btn.disabled = false;

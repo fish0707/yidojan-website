@@ -28,10 +28,39 @@ var MAX_PRICE = 100000;
 // ─── 菜單 DM 辨識 ─────────────────────────────────────────────────────────────
 // API key 放在「專案設定 → 指令碼屬性」，key 名稱 GEMINI_API_KEY。
 // 絕對不要寫在這裡，也不要寫進前端 —— repo 和網站都是公開的。
-var GEMINI_MODEL = 'gemini-2.5-flash';
-var GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/';
+// 模型可用指令碼屬性 GEMINI_MODEL 覆蓋，Google 換名字時不用重貼程式碼、不用重新部署。
+// 你的金鑰實際支援哪些模型，執行 authorizeAndSelfTest 就會列出來。
+var GEMINI_MODEL_DEFAULT = 'gemini-2.5-flash';
+var GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 var MAX_IMAGE_BYTES = 6 * 1024 * 1024;   // 前端會先壓縮，這是保險
 var MAX_PARSED_ITEMS = 120;
+
+function geminiKey_() {
+  return PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+}
+
+function geminiModel_() {
+  return PropertiesService.getScriptProperties().getProperty('GEMINI_MODEL') || GEMINI_MODEL_DEFAULT;
+}
+
+/**
+ * Apps Script 是「用到哪些服務就要哪些權限」，而授權是在使用者第一次同意時定下來的。
+ * 後來程式碼新增了 UrlFetchApp / DriveApp，舊的授權不涵蓋它們，呼叫就會被本機端擋下來
+ * （錯誤訊息長得像「你沒有呼叫 UrlFetchApp.fetch 的權限」），根本沒送出去過。
+ * 這裡把 GAS 的原始訊息翻成使用者知道該做什麼的話。
+ */
+function isAuthError_(message) {
+  var m = String(message || '');
+  return m.indexOf('script.external_request') !== -1
+      || m.indexOf('auth/drive') !== -1
+      || m.indexOf('PERMISSION_DENIED') !== -1
+      || (m.indexOf('權限') !== -1 && m.indexOf('必要') !== -1)
+      || m.indexOf('does not have permission') !== -1
+      || m.indexOf('Authorization is required') !== -1;
+}
+
+var AUTH_HINT = '指令碼還沒取得對外連線／Drive 的權限。'
+  + '請到 Apps Script 編輯器執行一次 authorizeAndSelfTest 完成授權，再重新部署。';
 
 // ─── 入口 ─────────────────────────────────────────────────────────────────────
 function doGet(e) {
@@ -790,10 +819,11 @@ function getHistory_(params) {
  * 真正落地是使用者在確認畫面按下去之後的 applyParsedMenu。
  */
 function parseMenuImage_(body) {
-  var key = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  var key = geminiKey_();
   if (!key) {
     return err('NO_API_KEY', '還沒設定 GEMINI_API_KEY，請到「專案設定 → 指令碼屬性」新增');
   }
+  var model = geminiModel_();
 
   var base64 = String(body.base64Data || '');
   var mime   = clean_(body.mimeType, 60) || 'image/jpeg';
@@ -851,7 +881,7 @@ function parseMenuImage_(body) {
     }
   };
 
-  var url = GEMINI_ENDPOINT + GEMINI_MODEL + ':generateContent?key=' + encodeURIComponent(key);
+  var url = GEMINI_API_BASE + '/' + model + ':generateContent?key=' + encodeURIComponent(key);
   var res;
   try {
     res = UrlFetchApp.fetch(url, {
@@ -861,14 +891,23 @@ function parseMenuImage_(body) {
       muteHttpExceptions: true
     });
   } catch (ex) {
+    // 授權不足會在這裡爆，而且請求根本沒送出去 —— 不要讓使用者誤以為是額度或計費問題
+    if (isAuthError_(ex.message)) return err('NEED_AUTH', AUTH_HINT);
     return err('UPSTREAM', '呼叫辨識服務失敗：' + ex.message);
   }
 
   var code = res.getResponseCode();
   var text = res.getContentText();
 
-  if (code === 429) return err('RATE_LIMIT', '今天的免費辨識額度用完了，請明天再試');
-  if (code === 400 && text.indexOf('API_KEY_INVALID') !== -1) return err('BAD_API_KEY', 'GEMINI_API_KEY 不正確，請重新設定');
+  if (code === 429) return err('RATE_LIMIT', '辨識額度用完了（每分鐘或每日上限），等一下或明天再試');
+  if (code === 403 || (code === 400 && text.indexOf('API_KEY_INVALID') !== -1)) {
+    return err('BAD_API_KEY', 'GEMINI_API_KEY 無效或未啟用，請重新產生一組並更新指令碼屬性');
+  }
+  if (code === 404 || text.indexOf('is not found') !== -1 || text.indexOf('NOT_FOUND') !== -1) {
+    return err('BAD_MODEL', '模型「' + model + '」不存在或你的金鑰無法使用。'
+      + '請在 Apps Script 執行 authorizeAndSelfTest 看可用模型清單，'
+      + '再用指令碼屬性 GEMINI_MODEL 指定其中一個。');
+  }
   if (code !== 200) return err('UPSTREAM', '辨識服務回傳錯誤（' + code + '）：' + text.slice(0, 300));
 
   var parsed;
@@ -949,9 +988,11 @@ function applyParsedMenu_(body) {
   }
 
   // 原始 DM 存到 Drive，點餐頁可以點開來對照
+  var imageWarning = '';
   if (body.base64Data) {
-    var url = saveMenuImage_(body.base64Data, body.mimeType, restaurant.name);
-    if (url) restaurant.menuImageUrl = url;
+    var saved = saveMenuImage_(body.base64Data, body.mimeType, restaurant.name);
+    if (saved.url) restaurant.menuImageUrl = saved.url;
+    else imageWarning = saved.error;
   }
   writeRow_(SHEET_RESTAURANTS, restaurant._row, restaurant);
 
@@ -976,14 +1017,19 @@ function applyParsedMenu_(body) {
   }
 
   return {
-    status:     'success',
-    serverNow:  Date.now(),
-    restaurant: restaurantPayload_(restaurant),
-    menu:       menuPayload_(restaurant.restaurantId, true)
+    status:       'success',
+    serverNow:    Date.now(),
+    restaurant:   restaurantPayload_(restaurant),
+    menu:         menuPayload_(restaurant.restaurantId, true),
+    imageWarning: imageWarning      // 菜單有進去、但原圖沒存成功時給前端提示用
   };
 }
 
-/** 存 DM 原圖到 Drive 並開放「知道連結的人可讀」，回傳可點開的網址 */
+/**
+ * 存 DM 原圖到 Drive 並開放「知道連結的人可讀」。
+ * 回傳 {url} 或 {error}——存圖失敗不該讓整個套用失敗，菜單本身才是重點，
+ * 但也不能靜默吞掉，否則使用者會以為功能壞了卻查不到原因。
+ */
 function saveMenuImage_(base64Data, mimeType, restaurantName) {
   try {
     var mime = clean_(mimeType, 60) || 'image/jpeg';
@@ -999,11 +1045,158 @@ function saveMenuImage_(base64Data, mimeType, restaurantName) {
     var file    = folder.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-    return 'https://drive.google.com/file/d/' + file.getId() + '/view';
+    return { url: 'https://drive.google.com/file/d/' + file.getId() + '/view' };
   } catch (ex) {
-    // 存圖失敗不該讓整個套用失敗，菜單本身才是重點
-    return '';
+    Logger.log('saveMenuImage_ 失敗：' + ex.message);
+    return { error: isAuthError_(ex.message) ? AUTH_HINT : ('存圖失敗：' + ex.message) };
   }
+}
+
+// ─── 授權與自我檢測 ───────────────────────────────────────────────────────────
+
+/**
+ * 在 Apps Script 編輯器裡執行這一支（不是從網頁呼叫）。它做兩件事：
+ *
+ * 1. 實際碰一次 DriveApp 與 UrlFetchApp，逼出涵蓋新權限的同意畫面。
+ *    新增用到的 Google 服務之後一定要重跑一次，否則網頁端會出現
+ *    「你沒有呼叫 UrlFetchApp.fetch 的權限」。
+ * 2. 檢查 GEMINI_API_KEY、列出你的金鑰實際可用的模型、並實跑一次辨識。
+ *
+ * 結果會印在下方的「執行紀錄」。
+ */
+function authorizeAndSelfTest() {
+  var log = [];
+  function say(s) { log.push(s); Logger.log(s); }
+
+  say('=== 午餐訂單系統 自我檢測 ===');
+
+  // ── 1. 試算表 ──
+  try {
+    var names = ss_().getSheets().map(function (s) { return s.getName(); });
+    say('✅ 試算表：可存取（工作表：' + names.join('、') + '）');
+  } catch (ex) {
+    say('❌ 試算表：' + ex.message);
+  }
+
+  // ── 2. Drive（存 DM 原圖用）──
+  try {
+    DriveApp.getRootFolder().getName();
+    say('✅ Drive：已授權，可以儲存菜單原圖');
+  } catch (ex) {
+    say('❌ Drive：' + ex.message);
+    say('   → 這一步失敗的話，辨識還是能用，只是不會保留 DM 原圖');
+  }
+
+  // ── 3. 對外連線 ──
+  try {
+    UrlFetchApp.fetch('https://www.google.com/generate_204', { muteHttpExceptions: true });
+    say('✅ 對外連線：已授權（script.external_request）');
+  } catch (ex) {
+    say('❌ 對外連線：' + ex.message);
+    say('   → 這就是「你沒有呼叫 UrlFetchApp.fetch 的權限」的來源。');
+    say('   → 如果剛剛沒有跳出同意畫面，請重新整理編輯器再執行一次這支函式。');
+    return log.join('\n');
+  }
+
+  // ── 4. API key ──
+  var key = geminiKey_();
+  if (!key) {
+    say('❌ 還沒設定 GEMINI_API_KEY');
+    say('   → 到「專案設定 → 指令碼屬性」新增，值從 https://aistudio.google.com/apikey 取得');
+    return log.join('\n');
+  }
+  say('✅ GEMINI_API_KEY：已設定（結尾 …' + key.slice(-4) + '）');
+
+  // ── 5. 這把金鑰實際能用哪些模型 ──
+  var model = geminiModel_();
+  say('目前設定的模型：' + model);
+
+  var models = listAvailableModels_(key);
+  if (models.error) {
+    say('❌ 取得模型清單失敗：' + models.error);
+    if (models.code === 403 || models.code === 400) {
+      say('   → 金鑰可能無效、或這個 Google 專案沒有啟用 Generative Language API');
+    }
+    return log.join('\n');
+  }
+
+  say('✅ 你的金鑰可用的模型（' + models.list.length + ' 個）：');
+  models.list.forEach(function (m) { say('     ' + m); });
+
+  if (models.list.indexOf(model) === -1) {
+    say('⚠️  目前設定的「' + model + '」不在上面的清單裡，辨識會失敗。');
+    var suggest = pickFlashModel_(models.list);
+    if (suggest) {
+      say('   → 建議改用：' + suggest);
+      say('   → 到「專案設定 → 指令碼屬性」新增 GEMINI_MODEL = ' + suggest + '（不用重新部署）');
+    }
+    return log.join('\n');
+  }
+
+  // ── 6. 實跑一次辨識 ──
+  // 1x1 的白色 PNG，只是要確認整條路通不通
+  var tiny = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  var probe = parseMenuImage_({ base64Data: tiny, mimeType: 'image/png' });
+
+  if (probe.status === 'success') {
+    say('✅ 辨識管線正常（測試圖沒有品項是預期的）');
+  } else if (probe.code === 'NO_ITEMS') {
+    // 1x1 空白圖讀不到品項才是對的 —— 代表請求有送到、也有正常回應
+    say('✅ 辨識管線正常（測試圖是空白的，讀不到品項屬預期結果）');
+  } else {
+    say('❌ 辨識失敗：[' + probe.code + '] ' + probe.error);
+  }
+
+  say('=== 檢測結束 ===');
+  say('若上面全是 ✅，請到「部署 → 管理部署作業 → 編輯 → 版本選新版本 → 部署」再回網頁測試。');
+  return log.join('\n');
+}
+
+/** 問 Google 這把金鑰能用哪些支援 generateContent 的模型 */
+function listAvailableModels_(key) {
+  var url = GEMINI_API_BASE + '?key=' + encodeURIComponent(key) + '&pageSize=200';
+  var res;
+  try {
+    res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  } catch (ex) {
+    return { error: isAuthError_(ex.message) ? AUTH_HINT : ex.message };
+  }
+
+  var code = res.getResponseCode();
+  if (code !== 200) return { error: 'HTTP ' + code + ' ' + res.getContentText().slice(0, 200), code: code };
+
+  var list = [];
+  try {
+    var data = JSON.parse(res.getContentText());
+    (data.models || []).forEach(function (m) {
+      var methods = m.supportedGenerationMethods || [];
+      if (methods.indexOf('generateContent') === -1) return;
+      list.push(String(m.name).replace(/^models\//, ''));
+    });
+  } catch (ex) {
+    return { error: '看不懂模型清單的格式' };
+  }
+  return { list: list };
+}
+
+/** 從可用清單裡挑一個適合的 flash 模型（便宜、快、免費方案通常留著它） */
+function pickFlashModel_(list) {
+  var flash = list.filter(function (n) {
+    return n.indexOf('flash') !== -1
+        && n.indexOf('thinking') === -1
+        && n.indexOf('image') === -1
+        && n.indexOf('tts') === -1
+        && n.indexOf('live') === -1;
+  });
+  if (!flash.length) return list[0] || '';
+
+  // preview / exp 的版本會被下架，優先挑穩定版；再來挑名字最「新」的
+  var stable = flash.filter(function (n) {
+    return n.indexOf('preview') === -1 && n.indexOf('exp') === -1;
+  });
+  var pool = stable.length ? stable : flash;
+  pool.sort();
+  return pool[pool.length - 1];
 }
 
 // ─── 首次安裝：建立四張工作表與範例資料 ───────────────────────────────────────
