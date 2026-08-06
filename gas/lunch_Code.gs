@@ -16,7 +16,7 @@ var SHEET_SESSIONS    = 'Sessions';
 var SHEET_ORDERS      = 'Orders';
 
 var HEADERS = {};
-HEADERS[SHEET_RESTAURANTS] = ['restaurantId', 'name', 'phone', 'note', 'active'];
+HEADERS[SHEET_RESTAURANTS] = ['restaurantId', 'name', 'phone', 'note', 'active', 'menuImageUrl'];
 HEADERS[SHEET_MENU_ITEMS]  = ['itemId', 'restaurantId', 'name', 'price', 'category', 'available'];
 HEADERS[SHEET_SESSIONS]    = ['sessionId', 'restaurantId', 'title', 'createdBy', 'createdAt', 'closeAt', 'status', 'rev'];
 HEADERS[SHEET_ORDERS]      = ['orderId', 'sessionId', 'name', 'clientToken', 'itemsJson', 'total', 'note', 'createdAt', 'updatedAt', 'deleted'];
@@ -24,6 +24,14 @@ HEADERS[SHEET_ORDERS]      = ['orderId', 'sessionId', 'name', 'clientToken', 'it
 var LOCK_TIMEOUT_MS = 10000;
 var MAX_ITEMS_PER_ORDER = 30;
 var MAX_PRICE = 100000;
+
+// ─── 菜單 DM 辨識 ─────────────────────────────────────────────────────────────
+// API key 放在「專案設定 → 指令碼屬性」，key 名稱 GEMINI_API_KEY。
+// 絕對不要寫在這裡，也不要寫進前端 —— repo 和網站都是公開的。
+var GEMINI_MODEL = 'gemini-2.5-flash';
+var GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/';
+var MAX_IMAGE_BYTES = 6 * 1024 * 1024;   // 前端會先壓縮，這是保險
+var MAX_PARSED_ITEMS = 120;
 
 // ─── 入口 ─────────────────────────────────────────────────────────────────────
 function doGet(e) {
@@ -64,6 +72,9 @@ function doPost(e) {
       case 'upsertRestaurant':return json(withLock_(function () { return upsertRestaurant_(body); }));
       case 'upsertMenuItem':  return json(withLock_(function () { return upsertMenuItem_(body); }));
       case 'deleteMenuItem':  return json(withLock_(function () { return deleteMenuItem_(body); }));
+      // 辨識要跑十幾秒，不能佔著全域鎖讓正在送單的人卡住；它也不寫試算表
+      case 'parseMenuImage':  return json(parseMenuImage_(body));
+      case 'applyParsedMenu': return json(withLock_(function () { return applyParsedMenu_(body); }));
       default:                return json(err('UNKNOWN_ACTION', '不支援的 action：' + action));
     }
   } catch (ex) {
@@ -103,15 +114,40 @@ function ss_() {
   return SpreadsheetApp.getActiveSpreadsheet();
 }
 
-/** 取得工作表，不存在就依 HEADERS 建立 */
+/** 取得工作表，不存在就依 HEADERS 建立；已存在但缺欄位就補上 */
 function sheet_(name) {
   var s = ss_().getSheetByName(name);
   if (!s) {
     s = ss_().insertSheet(name);
     s.appendRow(HEADERS[name]);
     s.setFrozenRows(1);
+    return s;
   }
+  ensureHeaders_(s, name);
   return s;
+}
+
+/**
+ * 後來版本新增的欄位（例如 menuImageUrl），在已經建好的試算表上自動補到標題列尾端，
+ * 使用者不用重建試算表或手動加欄位。只會補、不會動既有欄位的順序。
+ */
+function ensureHeaders_(s, name) {
+  var want = HEADERS[name];
+  if (s.getLastRow() === 0) {
+    s.appendRow(want);
+    s.setFrozenRows(1);
+    return;
+  }
+  var width = Math.max(s.getLastColumn(), 1);
+  var have = s.getRange(1, 1, 1, width).getValues()[0];
+
+  var missing = [];
+  for (var i = 0; i < want.length; i++) {
+    if (have.indexOf(want[i]) === -1) missing.push(want[i]);
+  }
+  if (missing.length === 0) return;
+
+  s.getRange(1, width + 1, 1, missing.length).setValues([missing]);
 }
 
 /** 讀整張表成物件陣列（含 _row 實際列號，供更新用） */
@@ -317,7 +353,8 @@ function restaurantPayload_(r) {
     name:         r.name,
     phone:        r.phone,
     note:         r.note,
-    active:       truthy_(r.active)
+    active:       truthy_(r.active),
+    menuImageUrl: r.menuImageUrl || ''
   };
 }
 
@@ -362,6 +399,7 @@ function upsertRestaurant_(body) {
     existing.phone  = clean_(body.phone, 30);
     existing.note   = clean_(body.note, 200);
     existing.active = body.active === undefined ? truthy_(existing.active) : !!body.active;
+    if (body.menuImageUrl !== undefined) existing.menuImageUrl = clean_(body.menuImageUrl, 300);
     writeRow_(SHEET_RESTAURANTS, existing._row, existing);
     return { status: 'success', restaurant: restaurantPayload_(existing) };
   }
@@ -371,7 +409,8 @@ function upsertRestaurant_(body) {
     name:         name,
     phone:        clean_(body.phone, 30),
     note:         clean_(body.note, 200),
-    active:       body.active === undefined ? true : !!body.active
+    active:       body.active === undefined ? true : !!body.active,
+    menuImageUrl: clean_(body.menuImageUrl, 300)
   };
   appendRow_(SHEET_RESTAURANTS, r);
   return { status: 'success', restaurant: restaurantPayload_(r) };
@@ -739,6 +778,232 @@ function getHistory_(params) {
     topRestaurants: topRestaurants,
     topSpenders:    topSpenders
   };
+}
+
+// ─── 菜單 DM 辨識 ─────────────────────────────────────────────────────────────
+
+/**
+ * 把一張菜單 DM 丟給 Gemini，要它吐出結構化的品項清單。
+ *
+ * 刻意「不」寫進試算表，也「不」包在 withLock_ 裡：
+ * 這支要跑十幾秒，佔著全域鎖會讓正在送單的同事全部卡住。
+ * 真正落地是使用者在確認畫面按下去之後的 applyParsedMenu。
+ */
+function parseMenuImage_(body) {
+  var key = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!key) {
+    return err('NO_API_KEY', '還沒設定 GEMINI_API_KEY，請到「專案設定 → 指令碼屬性」新增');
+  }
+
+  var base64 = String(body.base64Data || '');
+  var mime   = clean_(body.mimeType, 60) || 'image/jpeg';
+  if (!base64) return err('BAD_INPUT', '沒有收到圖片');
+  // base64 每 4 個字元代表 3 bytes
+  if (base64.length * 3 / 4 > MAX_IMAGE_BYTES) return err('TOO_LARGE', '圖片太大，請重拍或裁切後再試');
+  if (mime.indexOf('image/') !== 0) return err('BAD_INPUT', '只接受圖片檔');
+
+  var prompt = [
+    '這是一張台灣餐廳的菜單 DM 或價目表照片。請讀出上面所有可以點的餐點品項與價格。',
+    '',
+    '規則：',
+    '1. 價格一律用新台幣整數，不要小數點、不要 $ 或「元」。',
+    '2. 同一個品項若有大小份、冷熱、套餐等不同價格，拆成多筆，把差異寫進品項名稱，',
+    '   例如「牛肉麵(大)」「牛肉麵(小)」「紅茶(冰)」。',
+    '3. 只抓真的可以點的餐點。店名、地址、電話、營業時間、外送說明、',
+    '   「加飯免費」這類附註都不要當成品項。',
+    '4. 看不清楚價格的品項就不要收錄，不要猜。',
+    '5. category 只能是：主餐、飲料、配菜、湯品、甜點、其他。判斷不出來就填「其他」。',
+    '6. restaurantName 與 phone 如果 DM 上沒有就留空字串。',
+    '7. 品項名稱用圖片上的原文，不要翻譯、不要自己改寫。'
+  ].join('\n');
+
+  var payload = {
+    contents: [{
+      role: 'user',
+      parts: [
+        { text: prompt },
+        { inline_data: { mime_type: mime, data: base64 } }
+      ]
+    }],
+    generationConfig: {
+      temperature: 0,          // 抄字不需要創意
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          restaurantName: { type: 'STRING' },
+          phone:          { type: 'STRING' },
+          items: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                name:     { type: 'STRING' },
+                price:    { type: 'INTEGER' },
+                category: { type: 'STRING', enum: ['主餐', '飲料', '配菜', '湯品', '甜點', '其他'] }
+              },
+              required: ['name', 'price', 'category']
+            }
+          }
+        },
+        required: ['restaurantName', 'phone', 'items']
+      }
+    }
+  };
+
+  var url = GEMINI_ENDPOINT + GEMINI_MODEL + ':generateContent?key=' + encodeURIComponent(key);
+  var res;
+  try {
+    res = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  } catch (ex) {
+    return err('UPSTREAM', '呼叫辨識服務失敗：' + ex.message);
+  }
+
+  var code = res.getResponseCode();
+  var text = res.getContentText();
+
+  if (code === 429) return err('RATE_LIMIT', '今天的免費辨識額度用完了，請明天再試');
+  if (code === 400 && text.indexOf('API_KEY_INVALID') !== -1) return err('BAD_API_KEY', 'GEMINI_API_KEY 不正確，請重新設定');
+  if (code !== 200) return err('UPSTREAM', '辨識服務回傳錯誤（' + code + '）：' + text.slice(0, 300));
+
+  var parsed;
+  try {
+    var envelope = JSON.parse(text);
+    var cand = envelope.candidates && envelope.candidates[0];
+    if (!cand) return err('NO_RESULT', '辨識服務沒有回傳結果，請換一張清楚一點的照片');
+    if (cand.finishReason && cand.finishReason !== 'STOP') {
+      return err('NO_RESULT', '辨識中斷（' + cand.finishReason + '），請換一張照片再試');
+    }
+    parsed = JSON.parse(cand.content.parts[0].text);
+  } catch (ex) {
+    return err('BAD_RESULT', '看不懂辨識結果，請換一張照片再試');
+  }
+
+  // 後端自己再過濾一次，不信任模型的輸出
+  var items = [];
+  var raw = parsed.items || [];
+  for (var i = 0; i < raw.length && items.length < MAX_PARSED_ITEMS; i++) {
+    var name  = clean_(raw[i].name, 60);
+    var price = toInt_(raw[i].price, -1);
+    if (!name) continue;
+    if (price < 0 || price > MAX_PRICE) continue;
+    items.push({ name: name, price: price, category: clean_(raw[i].category, 40) || '其他' });
+  }
+
+  if (items.length === 0) {
+    return err('NO_ITEMS', '這張圖沒有辨識到任何品項，請確認拍的是菜單，並讓文字清楚一點');
+  }
+
+  return {
+    status:         'success',
+    serverNow:      Date.now(),
+    restaurantName: clean_(parsed.restaurantName, 60),
+    phone:          clean_(parsed.phone, 30),
+    items:          items
+  };
+}
+
+/** 把確認過的品項寫進試算表；replace 會清掉這間餐廳原本的菜單 */
+function applyParsedMenu_(body) {
+  var mode = body.mode === 'append' ? 'append' : 'replace';
+
+  var rawItems = body.items || [];
+  if (!rawItems.length) return err('BAD_INPUT', '沒有要套用的品項');
+  if (rawItems.length > MAX_PARSED_ITEMS) return err('BAD_INPUT', '品項數量過多');
+
+  var items = [];
+  for (var i = 0; i < rawItems.length; i++) {
+    var name  = clean_(rawItems[i].name, 60);
+    var price = toInt_(rawItems[i].price, -1);
+    if (!name) return err('BAD_INPUT', '有品項的名稱是空的');
+    if (price < 0 || price > MAX_PRICE) return err('BAD_INPUT', '「' + name + '」的價格不正確');
+    items.push({ name: name, price: price, category: clean_(rawItems[i].category, 40) });
+  }
+
+  // 餐廳：有帶 restaurantId 就更新，沒有就新開一間
+  var restaurant;
+  var rid = clean_(body.restaurantId, 64);
+  if (rid) {
+    restaurant = findRestaurant_(rid);
+    if (!restaurant) return err('NOT_FOUND', '找不到這間餐廳');
+    if (body.name)  restaurant.name  = clean_(body.name, 60);
+    if (body.phone !== undefined) restaurant.phone = clean_(body.phone, 30);
+  } else {
+    var newName = clean_(body.name, 60);
+    if (!newName) return err('BAD_INPUT', '請輸入餐廳名稱');
+    restaurant = {
+      restaurantId: uid_('r'),
+      name:         newName,
+      phone:        clean_(body.phone, 30),
+      note:         clean_(body.note, 200),
+      active:       true,
+      menuImageUrl: ''
+    };
+    appendRow_(SHEET_RESTAURANTS, restaurant);
+    restaurant = findRestaurant_(restaurant.restaurantId);
+  }
+
+  // 原始 DM 存到 Drive，點餐頁可以點開來對照
+  if (body.base64Data) {
+    var url = saveMenuImage_(body.base64Data, body.mimeType, restaurant.name);
+    if (url) restaurant.menuImageUrl = url;
+  }
+  writeRow_(SHEET_RESTAURANTS, restaurant._row, restaurant);
+
+  // replace：先把舊品項整批刪掉（由下往上刪，避免列號位移）
+  if (mode === 'replace') {
+    var s = sheet_(SHEET_MENU_ITEMS);
+    var rows = readAll_(SHEET_MENU_ITEMS);
+    for (var j = rows.length - 1; j >= 0; j--) {
+      if (String(rows[j].restaurantId) === String(restaurant.restaurantId)) s.deleteRow(rows[j]._row);
+    }
+  }
+
+  for (var k = 0; k < items.length; k++) {
+    appendRow_(SHEET_MENU_ITEMS, {
+      itemId:       uid_('m'),
+      restaurantId: restaurant.restaurantId,
+      name:         items[k].name,
+      price:        items[k].price,
+      category:     items[k].category,
+      available:    true
+    });
+  }
+
+  return {
+    status:     'success',
+    serverNow:  Date.now(),
+    restaurant: restaurantPayload_(restaurant),
+    menu:       menuPayload_(restaurant.restaurantId, true)
+  };
+}
+
+/** 存 DM 原圖到 Drive 並開放「知道連結的人可讀」，回傳可點開的網址 */
+function saveMenuImage_(base64Data, mimeType, restaurantName) {
+  try {
+    var mime = clean_(mimeType, 60) || 'image/jpeg';
+    var ext  = mime.split('/')[1] || 'jpg';
+    var blob = Utilities.newBlob(
+      Utilities.base64Decode(base64Data),
+      mime,
+      '菜單_' + (restaurantName || 'DM') + '_' + new Date().getTime() + '.' + ext
+    );
+
+    var folders = DriveApp.getFoldersByName('午餐菜單DM');
+    var folder  = folders.hasNext() ? folders.next() : DriveApp.createFolder('午餐菜單DM');
+    var file    = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    return 'https://drive.google.com/file/d/' + file.getId() + '/view';
+  } catch (ex) {
+    // 存圖失敗不該讓整個套用失敗，菜單本身才是重點
+    return '';
+  }
 }
 
 // ─── 首次安裝：建立四張工作表與範例資料 ───────────────────────────────────────

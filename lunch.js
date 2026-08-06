@@ -161,6 +161,49 @@ async function copyText(text) {
   }
 }
 
+// ─── 圖片壓縮 ─────────────────────────────────────────────────────────────────
+/**
+ * 手機直拍的照片動輒 4～8MB，轉成 base64 還會再脹 33%，
+ * 直接送會撐爆 GAS 的請求上限、也讓辨識變慢。
+ * 先在瀏覽器縮到長邊 1600px 再轉 JPEG —— 這個解析度對讀菜單文字綽綽有餘。
+ */
+function compressImage(file, maxEdge, quality) {
+  maxEdge = maxEdge || 1600;
+  quality = quality || 0.85;
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('讀取檔案失敗'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('這個檔案不是有效的圖片'));
+      img.onload = () => {
+        let { width, height } = img;
+        const scale = Math.min(1, maxEdge / Math.max(width, height));
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve({
+          base64: dataUrl.split(',')[1],
+          mimeType: 'image/jpeg',
+          dataUrl,
+          width,
+          height,
+        });
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 // ─── 純文字彙整（給店家 / 給收錢） ────────────────────────────────────────────
 function summaryTextForShop(summary) {
   const lines = [];

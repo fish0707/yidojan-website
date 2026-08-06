@@ -120,6 +120,19 @@ button.sm { padding: 6px 12px; font-size: .8rem; min-height: 32px; }
   border-radius: 99px; padding: 1px 8px; font-size: .7rem; font-weight: 600;
 }
 
+.cat-label {
+  font-size: .8rem; font-weight: 600; color: var(--text-light);
+  letter-spacing: .06em; margin: 14px 0 8px;
+  padding-bottom: 4px; border-bottom: 1px solid var(--border-light);
+}
+.cat-label:first-of-type { margin-top: 0; }
+.dm-link {
+  display: block; font-size: .82rem; color: var(--primary-orange);
+  background: #FFF8F4; border: 1px solid var(--border-light); border-radius: 8px;
+  padding: 9px 12px; margin-bottom: 12px; text-decoration: none;
+}
+.dm-link:hover { background: #FFF0E6; }
+
 /* ── 購物車 ── */
 .cart-row {
   display: grid;
@@ -445,18 +458,23 @@ function renderPickerCard() {
         點餐
         ${last.length ? `<button class="subtle sm" onclick="repeatLast()">重點上次</button>` : '<span class="hint">點一下加入</span>'}
       </h2>
+      ${state.restaurant && state.restaurant.menuImageUrl ? `
+        <a class="dm-link" href="${esc(state.restaurant.menuImageUrl)}" target="_blank" rel="noopener">
+          📄 看原始菜單 DM（菜單上沒列到的可以從這裡找）
+        </a>` : ''}
       ${menu.length === 0
         ? '<div class="empty">這間餐廳還沒建菜單，用下面的「其他品項」手動輸入即可。</div>'
-        : `<div class="menu-grid">${menu.map((m) => {
-            const inCart = state.cart.find((c) => c.itemId === m.itemId);
-            return `
-              <div class="menu-item" onclick="addItem('${esc(m.itemId)}')">
-                <span class="n">${esc(m.name)}</span>
-                <span class="p">${fmtMoney(m.price)}</span>
-                ${m.category ? `<span class="c">${esc(m.category)}</span>` : ''}
-                ${inCart ? `<span class="badge">已加 ${inCart.qty}</span>` : ''}
-              </div>`;
-          }).join('')}</div>`}
+        : groupByCategory(menu).map((group) => `
+            ${group.name ? `<div class="cat-label">${esc(group.name)}</div>` : ''}
+            <div class="menu-grid">${group.items.map((m) => {
+              const inCart = state.cart.find((c) => c.itemId === m.itemId);
+              return `
+                <div class="menu-item" data-item-id="${esc(m.itemId)}" onclick="addItem('${esc(m.itemId)}')">
+                  <span class="n">${esc(m.name)}</span>
+                  <span class="p">${fmtMoney(m.price)}</span>
+                  ${inCart ? `<span class="badge">已加 ${inCart.qty}</span>` : ''}
+                </div>`;
+            }).join('')}</div>`).join('')}
     </div>
 
     <div class="card">
@@ -576,6 +594,28 @@ function renderStickyBar() {
 }
 
 // ─── 購物車操作 ───────────────────────────────────────────────────────────────
+/** 依分類分組；只有一種分類（或都沒填）時不顯示標題，免得多一層沒意義的層次 */
+function groupByCategory(menu) {
+  // 照吃飯的順序排，主餐先挑、飲料最後
+  const order = ['主餐', '配菜', '湯品', '飲料', '甜點', '其他'];
+  const groups = [];
+
+  menu.forEach((m) => {
+    const key = m.category || '';
+    let g = groups.find((x) => x.name === key);
+    if (!g) { g = { name: key, items: [] }; groups.push(g); }
+    g.items.push(m);
+  });
+
+  if (groups.length <= 1) return [{ name: '', items: menu }];
+
+  groups.sort((a, b) => {
+    const ia = order.indexOf(a.name), ib = order.indexOf(b.name);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+  return groups;
+}
+
 function cartTotal() {
   return state.cart.reduce((a, c) => a + c.price * c.qty, 0);
 }
@@ -637,22 +677,18 @@ function refreshPicker() {
   const cartList = document.getElementById('cartList');
   if (cartList) cartList.innerHTML = renderCart();
 
-  // 菜單卡片上的「已加 N」標記
-  const menuGrid = document.querySelector('.menu-grid');
-  if (menuGrid) {
-    menuGrid.querySelectorAll('.menu-item').forEach((el, i) => {
-      const m = state.menu[i];
-      const inCart = state.cart.find((c) => c.itemId === m.itemId);
-      const badge = el.querySelector('.badge');
-      if (inCart && !badge) {
-        el.insertAdjacentHTML('beforeend', `<span class="badge">已加 ${inCart.qty}</span>`);
-      } else if (inCart && badge) {
-        badge.textContent = `已加 ${inCart.qty}`;
-      } else if (!inCart && badge) {
-        badge.remove();
-      }
-    });
-  }
+  // 菜單卡片上的「已加 N」標記（分類後會有多個 grid，所以用 itemId 對，不用索引）
+  document.querySelectorAll('.menu-item[data-item-id]').forEach((el) => {
+    const inCart = state.cart.find((c) => c.itemId === el.dataset.itemId);
+    const badge = el.querySelector('.badge');
+    if (inCart && !badge) {
+      el.insertAdjacentHTML('beforeend', `<span class="badge">已加 ${inCart.qty}</span>`);
+    } else if (inCart && badge) {
+      badge.textContent = `已加 ${inCart.qty}`;
+    } else if (!inCart && badge) {
+      badge.remove();
+    }
+  });
   bindCartInputs();
   renderStickyBar();
 }

@@ -58,6 +58,7 @@ input[type=text], input[type=number], input[type=datetime-local], select, textar
   border-radius: 8px; font-size: 16px; font-family: inherit; background: #fff; color: var(--text-dark);
 }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-orange); outline-offset: -1px; }
+input:disabled, select:disabled, textarea:disabled { background: #F2F2F2; color: #999; cursor: not-allowed; }
 
 button {
   font-family: inherit; font-size: .9rem; cursor: pointer; border: none; border-radius: 8px;
@@ -136,6 +137,33 @@ pre.plain {
 }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
+
+/* ── 菜單 DM 辨識 ── */
+.scan-card { border: 2px dashed var(--accent-orange); background: #FFFAF7; }
+.scan-tips { font-size: .78rem; color: var(--text-light); margin-top: 10px; }
+.scan-layout { display: grid; grid-template-columns: 1fr 260px; gap: 16px; margin-top: 14px; align-items: start; }
+.scan-list { min-width: 0; }
+.scan-image { position: sticky; top: 60px; }
+.dm-preview {
+  max-width: 100%; border-radius: 8px; border: 1px solid var(--border-light);
+  display: block; background: #fff;
+}
+.scan-list table input[type=text],
+.scan-list table input[type=number],
+.scan-list table select { padding: 6px 8px; font-size: 14px; }
+.scan-list td { padding: 5px 4px; }
+
+.spinner {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 3px solid var(--border-light); border-top-color: var(--primary-orange);
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 720px) {
+  .scan-layout { grid-template-columns: 1fr; }
+  .scan-image { position: static; order: -1; }   /* 手機上原圖擺到表格上面，方便邊看邊改 */
+}
 </style>
 </head>
 <body>
@@ -180,6 +208,7 @@ let state = {
   restaurants: [],
   menuRestaurantId: '',
   summary: null,
+  scan: null,        // 菜單 DM 辨識流程：null / {status:'parsing'|'review', …}
   tab: 'session',
   stopCountdown: null,
   countdownFor: null,
@@ -613,11 +642,28 @@ function copyAll()   { copyText(summaryTextForShop(state.summary) + '\n\n' + sum
 // ─── Tab 3：餐廳菜單 ──────────────────────────────────────────────────────────
 function renderMenuTab() {
   const el = document.getElementById('tab-menu');
+
+  // 辨識中／確認畫面會蓋掉整個分頁，避免使用者一邊確認一邊改別的東西
+  if (state.scan) { el.innerHTML = renderScanView(); return; }
+
   const current = state.restaurants.find((r) => r.restaurantId === state.menuRestaurantId);
 
   el.innerHTML = `
+    <div class="card scan-card">
+      <h2>📷 上傳菜單 DM 自動建菜單 <span class="hint">辨識約 10 秒</span></h2>
+      <p style="font-size:.85rem;color:var(--text-light);margin-bottom:12px">
+        拍一張店家的菜單或價目表，系統會讀出品項與價格。
+        辨識完會先讓你確認、可以改，按下套用才會存進去。
+      </p>
+      <input type="file" id="dmFile" accept="image/*" style="display:none" onchange="handleDmUpload(this)">
+      <button onclick="document.getElementById('dmFile').click()">選擇圖片</button>
+      <div class="scan-tips">
+        拍照小技巧：光線均勻、整張菜單入鏡、盡量正對不要斜拍，文字越清楚辨識越準。
+      </div>
+    </div>
+
     <div class="card">
-      <h2>新增餐廳</h2>
+      <h2>手動新增餐廳 <span class="hint">沒有 DM 或想自己建的話</span></h2>
       <div class="row">
         <input class="grow" type="text" id="rName" placeholder="餐廳名稱" maxlength="60">
         <input class="grow" type="text" id="rPhone" placeholder="電話（選填）" maxlength="30">
@@ -637,6 +683,11 @@ function renderMenuTab() {
             ${esc(r.name)}${r.active ? '' : '（停用）'}
           </option>`).join('')}
       </select>
+
+      ${current && current.menuImageUrl ? `
+        <div style="margin-top:8px;font-size:.82rem">
+          <a href="${esc(current.menuImageUrl)}" target="_blank" rel="noopener">📄 看這間的原始 DM</a>
+        </div>` : ''}
 
       ${current ? `
         <div class="row" style="margin-top:12px">
@@ -662,6 +713,262 @@ function renderMenuTab() {
               </div>`).join('')}
         </div>` : ''}
     </div>`}`;
+}
+
+// ─── 菜單 DM 辨識 ─────────────────────────────────────────────────────────────
+async function handleDmUpload(input) {
+  const file = input.files && input.files[0];
+  input.value = '';   // 清掉才能連續選同一個檔案
+  if (!file) return;
+
+  if (file.size > 15 * 1024 * 1024) { showToast('圖片太大了（超過 15MB）', true); return; }
+
+  let img;
+  try {
+    img = await compressImage(file, 1600, 0.85);
+  } catch (e) {
+    showToast(e.message || '讀取圖片失敗', true);
+    return;
+  }
+
+  state.scan = { status: 'parsing', dataUrl: img.dataUrl };
+  renderMenuTab();
+
+  try {
+    const data = await gasPost({
+      action: 'parseMenuImage',
+      base64Data: img.base64,
+      mimeType: img.mimeType,
+    });
+    if (data.status === 'error') throw new Error(data.error);
+
+    state.scan = {
+      status: 'review',
+      dataUrl: img.dataUrl,
+      base64: img.base64,
+      mimeType: img.mimeType,
+      items: data.items.map((it) => ({ ...it })),
+      // 辨識到的店名如果對得上現有餐廳就自動選起來，省一次手動比對
+      targetRestaurantId: matchRestaurant(data.restaurantName),
+      restaurantName: data.restaurantName || '',
+      phone: data.phone || '',
+      mode: 'replace',
+    };
+    renderMenuTab();
+    showToast(`辨識到 ${data.items.length} 個品項，請確認`);
+  } catch (e) {
+    state.scan = null;
+    renderMenuTab();
+    showToast(e.message || '辨識失敗，請再試一次', true);
+  }
+}
+
+function matchRestaurant(name) {
+  if (!name) return '';
+  const hit = state.restaurants.find((r) => r.name === name);
+  return hit ? hit.restaurantId : '';
+}
+
+function renderScanView() {
+  const s = state.scan;
+
+  if (s.status === 'parsing') {
+    return `
+      <div class="card">
+        <h2>辨識中…</h2>
+        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+          <img src="${s.dataUrl}" class="dm-preview" alt="上傳的菜單">
+          <div style="flex:1;min-width:180px">
+            <div class="spinner"></div>
+            <p style="font-size:.86rem;color:var(--text-light);margin-top:10px">
+              正在讀取圖片上的品項與價格，大約 10 秒，請不要關掉這一頁。
+            </p>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  const total = s.items.length;
+  const opts = state.restaurants.map((r) => `
+    <option value="${esc(r.restaurantId)}" ${r.restaurantId === s.targetRestaurantId ? 'selected' : ''}>
+      ${esc(r.name)}
+    </option>`).join('');
+
+  return `
+    <div class="card">
+      <h2>確認辨識結果 <span class="hint">共 ${total} 個品項</span></h2>
+      <p style="font-size:.85rem;color:var(--text-light)">
+        辨識不會 100% 正確，<strong>價格請對著右邊的原圖再看一遍</strong>——
+        金額錯了會直接變成大家收錢的依據。可以改字、改價、刪掉不要的，也可以自己補一列。
+      </p>
+
+      <div class="scan-layout">
+        <div class="scan-list">
+          <div class="table-scroll"><table>
+            <thead><tr><th>品項</th><th class="num" style="width:90px">價格</th><th style="width:110px">分類</th><th style="width:56px"></th></tr></thead>
+            <tbody>${s.items.map((it, i) => `
+              <tr>
+                <td><input type="text" value="${esc(it.name)}" maxlength="60"
+                           oninput="state.scan.items[${i}].name=this.value"></td>
+                <td><input type="number" value="${it.price}" min="0" max="100000" inputmode="numeric"
+                           oninput="state.scan.items[${i}].price=parseInt(this.value,10)||0; refreshScanTotal()"></td>
+                <td>
+                  <select onchange="state.scan.items[${i}].category=this.value">
+                    ${['主餐', '飲料', '配菜', '湯品', '甜點', '其他'].map((c) =>
+                      `<option ${c === it.category ? 'selected' : ''}>${c}</option>`).join('')}
+                  </select>
+                </td>
+                <td><button class="danger sm" onclick="removeScanItem(${i})">✕</button></td>
+              </tr>`).join('')}
+            </tbody>
+          </table></div>
+          <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="subtle sm" onclick="addScanItem()">＋ 手動補一列</button>
+            <span id="scanTotal" style="font-size:.82rem;color:var(--text-light)">${scanSummaryText()}</span>
+          </div>
+        </div>
+
+        <div class="scan-image">
+          <a href="${s.dataUrl}" target="_blank" rel="noopener" title="點開看大圖">
+            <img src="${s.dataUrl}" class="dm-preview" alt="上傳的菜單">
+          </a>
+          <div style="font-size:.75rem;color:var(--text-light);margin-top:6px;text-align:center">點圖片可放大</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>要套用到哪一間？</h2>
+
+      <label class="field">
+        <input type="radio" name="scanTarget" value="existing" ${s.targetRestaurantId ? 'checked' : ''}
+               onchange="setScanTarget('existing')" style="width:auto;margin-right:6px">
+        更新現有的餐廳
+      </label>
+      <select id="scanRestaurant" ${s.targetRestaurantId ? '' : 'disabled'}
+              onchange="state.scan.targetRestaurantId=this.value">
+        ${state.restaurants.length ? opts : '<option value="">（還沒有任何餐廳）</option>'}
+      </select>
+
+      <label class="field" style="margin-top:14px">
+        <input type="radio" name="scanTarget" value="new" ${s.targetRestaurantId ? '' : 'checked'}
+               onchange="setScanTarget('new')" style="width:auto;margin-right:6px">
+        建立新餐廳
+      </label>
+      <div class="row">
+        <input class="grow" type="text" id="scanName" placeholder="餐廳名稱" maxlength="60"
+               value="${esc(s.restaurantName)}" ${s.targetRestaurantId ? 'disabled' : ''}>
+        <input class="grow" type="text" id="scanPhone" placeholder="電話（選填）" maxlength="30"
+               value="${esc(s.phone)}" ${s.targetRestaurantId ? 'disabled' : ''}>
+      </div>
+      ${s.restaurantName || s.phone
+        ? '<div style="font-size:.78rem;color:var(--text-light);margin-top:6px">店名與電話是從 DM 上讀到的，可以直接改。</div>'
+        : ''}
+
+      ${s.targetRestaurantId ? `
+        <label class="field" style="margin-top:14px">舊品項怎麼處理</label>
+        <div class="row">
+          <label style="flex:1;font-size:.86rem">
+            <input type="radio" name="scanMode" value="replace" ${s.mode === 'replace' ? 'checked' : ''}
+                   onchange="state.scan.mode='replace'" style="width:auto;margin-right:6px">
+            取代整份菜單
+          </label>
+          <label style="flex:1;font-size:.86rem">
+            <input type="radio" name="scanMode" value="append" ${s.mode === 'append' ? 'checked' : ''}
+                   onchange="state.scan.mode='append'" style="width:auto;margin-right:6px">
+            追加在後面
+          </label>
+        </div>
+        <div style="font-size:.78rem;color:var(--text-light);margin-top:6px">
+          取代會清掉這間餐廳原本的品項；已經送出的歷史訂單不受影響。
+        </div>` : ''}
+
+      <div class="row" style="margin-top:18px">
+        <button onclick="applyScan()" id="applyScanBtn">確認並套用</button>
+        <button class="subtle" onclick="cancelScan()">取消</button>
+      </div>
+    </div>`;
+}
+
+function scanSummaryText() {
+  const items = state.scan.items;
+  if (!items.length) return '目前沒有品項';
+  const prices = items.map((i) => i.price);
+  return `${items.length} 個品項，價格範圍 ${fmtMoney(Math.min(...prices))} ～ ${fmtMoney(Math.max(...prices))}`;
+}
+
+function refreshScanTotal() {
+  const el = document.getElementById('scanTotal');
+  if (el) el.textContent = scanSummaryText();
+}
+
+function removeScanItem(i) {
+  state.scan.items.splice(i, 1);
+  renderMenuTab();
+}
+
+function addScanItem() {
+  state.scan.items.push({ name: '', price: 0, category: '其他' });
+  renderMenuTab();
+}
+
+function setScanTarget(which) {
+  state.scan.targetRestaurantId = which === 'existing'
+    ? (document.getElementById('scanRestaurant').value || (state.restaurants[0] || {}).restaurantId || '')
+    : '';
+  renderMenuTab();
+}
+
+function cancelScan() {
+  if (!confirm('取消的話這次辨識的結果就沒了，確定嗎？')) return;
+  state.scan = null;
+  renderMenuTab();
+}
+
+async function applyScan() {
+  const s = state.scan;
+  const items = s.items.filter((it) => (it.name || '').trim());
+  if (!items.length) { showToast('至少要留一個品項', true); return; }
+
+  const bad = items.find((it) => !(it.price >= 0));
+  if (bad) { showToast(`「${bad.name}」的價格不正確`, true); return; }
+
+  const payload = {
+    action: 'applyParsedMenu',
+    items,
+    mode: s.mode,
+    base64Data: s.base64,
+    mimeType: s.mimeType,
+  };
+
+  if (s.targetRestaurantId) {
+    payload.restaurantId = s.targetRestaurantId;
+  } else {
+    const name = (document.getElementById('scanName').value || '').trim();
+    if (!name) { showToast('請輸入餐廳名稱', true); document.getElementById('scanName').focus(); return; }
+    payload.name = name;
+    payload.phone = document.getElementById('scanPhone').value || '';
+  }
+
+  const btn = document.getElementById('applyScanBtn');
+  btn.disabled = true;
+  btn.textContent = '儲存中…';
+
+  try {
+    const data = await gasPost(payload);
+    if (data.status === 'error') throw new Error(data.error);
+
+    await loadRestaurants();
+    state.menuRestaurantId = data.restaurant.restaurantId;
+    state.scan = null;
+    renderMenuTab();
+    renderSessionTab();
+    showToast(`已套用 ${items.length} 個品項到「${data.restaurant.name}」`);
+  } catch (e) {
+    showToast(e.message || '套用失敗，請重試', true);
+    btn.disabled = false;
+    btn.textContent = '確認並套用';
+  }
 }
 
 async function addRestaurant() {
