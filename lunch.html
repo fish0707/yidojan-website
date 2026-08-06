@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今天吃什麼 - 午餐訂單</title>
+<style>
+:root {
+  --primary-orange: #FF7F3F;
+  --secondary-orange: #FF9966;
+  --accent-orange: #FFB380;
+  --light-bg: #FFF5F0;
+  --white: #FFFFFF;
+  --text-dark: #3D3D3D;
+  --text-light: #6B6B6B;
+  --border-light: #FFE8DC;
+  --danger: #E04F4F;
+  --ok: #3FA35F;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', 'PingFang TC', 'PingFang SC', 'Microsoft JhengHei', sans-serif;
+  background: var(--light-bg);
+  color: var(--text-dark);
+  line-height: 1.6;
+  padding-bottom: 90px;
+}
+.wrap { max-width: 720px; margin: 0 auto; padding: 0 14px; }
+
+/* ── 頂部場次資訊 ── */
+.hero {
+  background: linear-gradient(135deg, var(--primary-orange), var(--secondary-orange));
+  color: #fff;
+  padding: 18px 14px 20px;
+}
+.hero .wrap { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.hero-info { flex: 1; min-width: 180px; }
+.hero-title { font-size: 1.35rem; font-weight: 700; letter-spacing: .02em; }
+.hero-sub { font-size: .85rem; opacity: .92; margin-top: 2px; }
+.countdown {
+  background: rgba(255,255,255,.2);
+  border-radius: 12px;
+  padding: 8px 16px;
+  text-align: center;
+  min-width: 116px;
+}
+.countdown .label { font-size: .7rem; opacity: .9; letter-spacing: .08em; }
+.countdown .value { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.countdown.urgent { background: rgba(224,79,79,.9); animation: pulse 1s infinite; }
+.countdown.closed { background: rgba(0,0,0,.28); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .65; } }
+
+/* ── 卡片 ── */
+.card {
+  background: var(--white);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 16px;
+  margin-top: 14px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+}
+.card h2 {
+  font-size: 1.02rem;
+  font-weight: 600;
+  color: var(--primary-orange);
+  margin-bottom: 12px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.card h2 .hint { font-size: .75rem; font-weight: 400; color: var(--text-light); }
+
+/* ── 表單 ── */
+label.field { display: block; font-size: .8rem; color: var(--text-light); margin-bottom: 4px; }
+input[type=text], input[type=number], input[type=datetime-local], select, textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  font-size: 16px; /* 16px 以下 iOS 會自動放大頁面 */
+  font-family: inherit;
+  background: #fff;
+  color: var(--text-dark);
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-orange); outline-offset: -1px; }
+input:disabled, textarea:disabled, select:disabled { background: #f6f6f6; color: #999; }
+
+button {
+  font-family: inherit; font-size: .9rem; cursor: pointer;
+  border: none; border-radius: 8px; padding: 10px 16px;
+  background: var(--primary-orange); color: #fff; font-weight: 600;
+  transition: filter .15s, transform .1s;
+  min-height: 40px;
+}
+button:hover:not(:disabled) { filter: brightness(1.06); }
+button:active:not(:disabled) { transform: scale(.98); }
+button:disabled { background: #ccc; cursor: not-allowed; }
+button.ghost { background: #fff; color: var(--primary-orange); border: 1px solid var(--accent-orange); }
+button.subtle { background: var(--border-light); color: var(--text-dark); }
+button.danger { background: var(--danger); }
+button.sm { padding: 6px 12px; font-size: .8rem; min-height: 32px; }
+
+/* ── 菜單 ── */
+.menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.menu-item {
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+  background: #fff;
+  transition: all .15s;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.menu-item:hover { border-color: var(--accent-orange); background: #FFFAF7; }
+.menu-item:active { transform: scale(.98); }
+.menu-item .n { font-weight: 600; font-size: .95rem; }
+.menu-item .p { color: var(--primary-orange); font-weight: 600; font-size: .9rem; }
+.menu-item .c { font-size: .72rem; color: var(--text-light); }
+.menu-item .badge {
+  align-self: flex-start; margin-top: 4px;
+  background: var(--primary-orange); color: #fff;
+  border-radius: 99px; padding: 1px 8px; font-size: .7rem; font-weight: 600;
+}
+
+/* ── 購物車 ── */
+.cart-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px; align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border-light);
+}
+.cart-row:last-child { border-bottom: none; }
+.cart-name { font-weight: 600; font-size: .93rem; }
+.cart-meta { font-size: .78rem; color: var(--text-light); }
+.cart-note {
+  width: 100%; margin-top: 4px; padding: 5px 8px; font-size: 13px;
+  border: 1px solid var(--border-light); border-radius: 6px;
+}
+.qty { display: flex; align-items: center; gap: 6px; }
+.qty button {
+  width: 30px; height: 30px; min-height: 30px; padding: 0;
+  border-radius: 50%; background: var(--border-light); color: var(--text-dark);
+  font-size: 1.1rem; line-height: 1; font-weight: 700;
+}
+.qty span { min-width: 20px; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cart-sub { font-weight: 700; color: var(--primary-orange); min-width: 58px; text-align: right; font-variant-numeric: tabular-nums; }
+.empty { color: var(--text-light); font-size: .87rem; text-align: center; padding: 18px 0; }
+
+/* ── 底部固定送出列 ── */
+.sticky-bar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: #fff; border-top: 1px solid var(--border-light);
+  box-shadow: 0 -2px 12px rgba(0,0,0,.08);
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  z-index: 90;
+}
+.sticky-bar .wrap { display: flex; align-items: center; gap: 12px; padding: 0; }
+.sticky-total { flex: 1; }
+.sticky-total .t { font-size: 1.25rem; font-weight: 700; color: var(--primary-orange); font-variant-numeric: tabular-nums; }
+.sticky-total .s { font-size: .75rem; color: var(--text-light); }
+.sticky-bar button { flex: 0 0 auto; padding: 12px 26px; font-size: 1rem; }
+
+/* ── 全體訂單 ── */
+.order-line {
+  display: flex; justify-content: space-between; gap: 10px;
+  padding: 9px 0; border-bottom: 1px dashed var(--border-light);
+  font-size: .88rem;
+}
+.order-line:last-child { border-bottom: none; }
+.order-line.mine { background: #FFF8F4; margin: 0 -8px; padding-left: 8px; padding-right: 8px; border-radius: 6px; }
+.order-line .who { font-weight: 600; flex: 0 0 auto; }
+.order-line .what { flex: 1; color: var(--text-light); }
+.order-line .amt { font-weight: 600; color: var(--primary-orange); font-variant-numeric: tabular-nums; }
+.stats { display: flex; gap: 18px; font-size: .82rem; color: var(--text-light); margin-bottom: 10px; }
+.stats b { color: var(--primary-orange); font-size: 1.05rem; }
+
+/* ── 彙整（收單後） ── */
+.sum-row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px dashed var(--border-light); font-size: .9rem; }
+.sum-row:last-child { border-bottom: none; }
+.sum-total { display: flex; justify-content: space-between; padding-top: 10px; margin-top: 6px; border-top: 2px solid var(--border-light); font-weight: 700; font-size: 1rem; color: var(--primary-orange); }
+
+.banner {
+  border-radius: 8px; padding: 12px 14px; font-size: .88rem; margin-top: 14px;
+  background: #FFF0E6; border: 1px solid var(--accent-orange);
+}
+.banner.closed { background: #EFEFEF; border-color: #DDD; color: var(--text-light); }
+
+.toast {
+  position: fixed; top: 16px; left: 50%;
+  transform: translateX(-50%) translateY(-8px);
+  background: var(--text-dark); color: #fff;
+  padding: 10px 20px; border-radius: 99px; font-size: 14px;
+  opacity: 0; transition: .25s; pointer-events: none; z-index: 200;
+  max-width: 90vw; text-align: center;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.error { background: var(--danger); }
+
+.loading { text-align: center; padding: 44px 0; color: var(--text-light); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.row > * { flex: 1; min-width: 0; }
+.footer-link { text-align: center; padding: 20px 0; font-size: .8rem; }
+.footer-link a { color: var(--text-light); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="wrap">
+    <div class="hero-info">
+      <div class="hero-title" id="heroTitle">載入中…</div>
+      <div class="hero-sub" id="heroSub">正在取得今天的午餐訂單</div>
+    </div>
+    <div class="countdown" id="countdown" style="display:none">
+      <div class="label">距離截止</div>
+      <div class="value" id="countdownValue">--:--</div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div id="loading" class="loading">載入中…</div>
+  <div id="content" style="display:none"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="lunch.js"></script>
+<script>
+// ─── 狀態 ─────────────────────────────────────────────────────────────────────
+let state = {
+  session: null,
+  restaurant: null,
+  menu: [],
+  orders: [],
+  rev: -1,
+  cart: [],          // [{name, price, qty, note, itemId}]
+  myOrder: null,     // 我已送出的訂單
+  editing: false,    // 正在改我的單
+  stopCountdown: null,
+  warned5min: false,
+};
+
+const POLL_INTERVAL = 8000;
+let isPolling = false;
+let isBusy = false;   // 送出中：暫停自動重繪，不打斷使用者
+
+// ─── 啟動 ─────────────────────────────────────────────────────────────────────
+init();
+
+async function init() {
+  const sessionId = new URLSearchParams(location.search).get('s') || '';
+  try {
+    const data = await gasGet(sessionId ? { action: 'getSession', sessionId } : { action: 'getBootstrap' });
+    if (data.status === 'error') throw new Error(data.error);
+
+    syncClock(data.serverNow);
+    state.session    = data.session;
+    state.restaurant = data.restaurant;
+    state.menu       = data.menu || [];
+    state.orders     = data.orders || [];
+    state.rev        = data.session ? data.session.rev : -1;
+
+    detectMyOrder();
+    renderHero();
+    render();
+
+    if (state.session) setInterval(poll, POLL_INTERVAL);
+  } catch (e) {
+    document.getElementById('loading').innerHTML =
+      '載入失敗：' + esc(e.message) + '<br><br><button onclick="location.reload()">重新整理</button>';
+  }
+}
+
+/** 用 localStorage 的名字比對出「我的訂單」；後端仍以 clientToken 把關 */
+function detectMyOrder() {
+  const myName = getMyName();
+  state.myOrder = myName
+    ? (state.orders.find((o) => o.name === myName) || null)
+    : null;
+}
+
+// ─── 輪詢 ─────────────────────────────────────────────────────────────────────
+async function poll() {
+  if (isPolling || isBusy || !state.session) return;
+  isPolling = true;
+  try {
+    const data = await gasGet({ action: 'poll', sessionId: state.session.sessionId, rev: state.rev });
+    if (data.status === 'error') return;
+
+    syncClock(data.serverNow);
+    const wasOpen = state.session.status === 'open';
+    state.session = data.session;
+
+    // rev 沒變就不動 DOM，避免打斷正在輸入備註的人
+    if (data.changed) {
+      state.rev = data.rev;
+      state.orders = data.orders || [];
+      detectMyOrder();
+      // 正在點餐（購物車有東西或正在改單）就只更新「大家點了什麼」，
+      // 整頁重繪會清掉還沒送出的購物車與輸入焦點
+      if (isOpen() && (state.cart.length > 0 || state.editing)) refreshEveryone();
+      else render();
+    } else if (wasOpen && data.session.status !== 'open') {
+      render();   // 只有狀態從收單中轉為已截止時才需要重繪
+    }
+    renderHero();
+  } catch (e) {
+    // 網路瞬斷不吵使用者，下一輪會補上
+  } finally {
+    isPolling = false;
+  }
+}
+
+// ─── 頂部與倒數 ───────────────────────────────────────────────────────────────
+function isOpen() {
+  return !!state.session && state.session.status === 'open' && state.session.closeAt > serverTime();
+}
+
+function renderHero() {
+  const s = state.session;
+  const cd = document.getElementById('countdown');
+
+  if (!s) {
+    document.getElementById('heroTitle').textContent = '今天還沒開單';
+    document.getElementById('heroSub').textContent = '請主揪到「主揪頁」開一場午餐訂單';
+    cd.style.display = 'none';
+    return;
+  }
+
+  document.getElementById('heroTitle').textContent = s.title;
+  const r = state.restaurant;
+  document.getElementById('heroSub').textContent =
+    (r ? r.name : '') + (r && r.phone ? ' · ' + r.phone : '') + ' · 截止 ' + fmtClock(s.closeAt);
+
+  cd.style.display = '';
+  // 主揪延長時間後 closeAt 會變，倒數要重新起算
+  if (state.stopCountdown && state.countdownFor === s.closeAt) return;
+  if (state.stopCountdown) { state.stopCountdown(); state.warned5min = false; }
+  state.countdownFor = s.closeAt;
+
+  state.stopCountdown = startCountdown(
+    s.closeAt,
+    (remain) => {
+      // 主揪可能提前手動收單，狀態一律讀 state.session（不要用閉包裡的舊值）
+      const manuallyClosed = state.session.status === 'closed' && remain > 0;
+      document.getElementById('countdownValue').textContent =
+        manuallyClosed ? '已收單' : fmtRemain(remain);
+      cd.classList.toggle('urgent', !manuallyClosed && remain > 0 && remain <= 5 * 60000);
+      cd.classList.toggle('closed', remain <= 0 || manuallyClosed);
+
+      if (!manuallyClosed && remain > 0 && remain <= 5 * 60000 && !state.warned5min) {
+        state.warned5min = true;
+        showToast('剩不到 5 分鐘就要收單囉！');
+      }
+    },
+    () => { render(); }
+  );
+}
+
+// ─── 主渲染 ───────────────────────────────────────────────────────────────────
+function render() {
+  document.getElementById('loading').style.display = 'none';
+  const el = document.getElementById('content');
+  el.style.display = '';
+
+  if (!state.session) {
+    el.innerHTML = `
+      <div class="card">
+        <h2>目前沒有進行中的訂單</h2>
+        <p style="font-size:.9rem;color:var(--text-light)">
+          等主揪決定好餐廳、開單之後，這頁就會出現菜單讓大家點餐。
+        </p>
+        <div style="margin-top:14px"><a href="lunch_admin.html"><button class="ghost">我是主揪，去開單 →</button></a></div>
+      </div>`;
+    renderStickyBar();
+    return;
+  }
+
+  el.innerHTML = isOpen() ? renderOpenView() : renderClosedView();
+  renderStickyBar();
+  bindCartInputs();
+}
+
+function renderOpenView() {
+  return `
+    ${renderNameCard()}
+    ${state.myOrder && !state.editing ? renderMyOrderCard() : renderPickerCard()}
+    ${renderEveryoneCard()}
+    <div class="footer-link"><a href="lunch_admin.html">主揪管理頁 →</a></div>
+  `;
+}
+
+function renderClosedView() {
+  const byItem = aggregateByItem(state.orders);
+  const grand = state.orders.reduce((a, o) => a + o.total, 0);
+  const qty = byItem.reduce((a, i) => a + i.qty, 0);
+
+  return `
+    <div class="banner closed">🔒 已經停止收單，以下是彙整結果。</div>
+
+    <div class="card">
+      <h2>訂單彙整 <span class="hint">給店家點餐用</span></h2>
+      ${byItem.length === 0 ? '<div class="empty">這場沒有人點餐</div>' : byItem.map((it) => `
+        <div class="sum-row">
+          <span>${esc(it.name)}${it.note ? `<span class="cart-meta">（${esc(it.note)}）</span>` : ''} × ${it.qty}</span>
+          <span>${fmtMoney(it.subtotal)}</span>
+        </div>`).join('')}
+      <div class="sum-total"><span>共 ${qty} 份</span><span>${fmtMoney(grand)}</span></div>
+    </div>
+
+    <div class="card">
+      <h2>每人應付 <span class="hint">${state.orders.length} 人</span></h2>
+      ${state.orders.length === 0 ? '<div class="empty">這場沒有人點餐</div>' : state.orders.map((o) => `
+        <div class="order-line ${o.name === getMyName() ? 'mine' : ''}">
+          <span class="who">${esc(o.name)}</span>
+          <span class="what">${esc(itemsText(o.items))}</span>
+          <span class="amt">${fmtMoney(o.total)}</span>
+        </div>`).join('')}
+    </div>
+
+    <div class="card">
+      <button class="ghost" onclick="copySummary()">複製彙整文字</button>
+    </div>
+    <div class="footer-link"><a href="lunch_admin.html">主揪管理頁 →</a></div>
+  `;
+}
+
+function renderNameCard() {
+  return `
+    <div class="card">
+      <h2>你的名字</h2>
+      <input type="text" id="nameInput" placeholder="例如：小明" value="${esc(getMyName())}"
+             oninput="setMyName(this.value)" maxlength="30">
+      <div class="cart-meta" style="margin-top:6px">名字會記在這台裝置，下次自動帶入。</div>
+    </div>`;
+}
+
+function renderPickerCard() {
+  const menu = state.menu;
+  const last = loadLastOrder(state.session.restaurantId);
+
+  return `
+    <div class="card">
+      <h2>
+        點餐
+        ${last.length ? `<button class="subtle sm" onclick="repeatLast()">重點上次</button>` : '<span class="hint">點一下加入</span>'}
+      </h2>
+      ${menu.length === 0
+        ? '<div class="empty">這間餐廳還沒建菜單，用下面的「其他品項」手動輸入即可。</div>'
+        : `<div class="menu-grid">${menu.map((m) => {
+            const inCart = state.cart.find((c) => c.itemId === m.itemId);
+            return `
+              <div class="menu-item" onclick="addItem('${esc(m.itemId)}')">
+                <span class="n">${esc(m.name)}</span>
+                <span class="p">${fmtMoney(m.price)}</span>
+                ${m.category ? `<span class="c">${esc(m.category)}</span>` : ''}
+                ${inCart ? `<span class="badge">已加 ${inCart.qty}</span>` : ''}
+              </div>`;
+          }).join('')}</div>`}
+    </div>
+
+    <div class="card">
+      <h2>其他品項 <span class="hint">菜單上沒有的自己填</span></h2>
+      <div class="row">
+        <input type="text" id="customName" placeholder="品項名稱" maxlength="60" style="flex:2">
+        <input type="number" id="customPrice" placeholder="金額" min="0" max="100000" inputmode="numeric" style="flex:1">
+      </div>
+      <div style="margin-top:8px"><button class="ghost" onclick="addCustom()">加入</button></div>
+    </div>
+
+    <div class="card">
+      <h2>我的購物車</h2>
+      <div id="cartList">${renderCart()}</div>
+      <label class="field" style="margin-top:12px">整筆備註（選填）</label>
+      <input type="text" id="orderNote" placeholder="例如：我付現金 / 幫我拿到 3 樓" maxlength="200"
+             value="${esc(state.editing && state.myOrder ? state.myOrder.note : '')}">
+      ${state.editing ? '<div style="margin-top:10px"><button class="subtle" onclick="cancelEdit()">取消修改</button></div>' : ''}
+    </div>`;
+}
+
+function renderCart() {
+  if (state.cart.length === 0) return '<div class="empty">還沒點東西，從上面的菜單挑一個吧</div>';
+
+  return state.cart.map((c, i) => `
+    <div class="cart-row">
+      <div>
+        <div class="cart-name">${esc(c.name)}</div>
+        <div class="cart-meta">${fmtMoney(c.price)} / 份</div>
+        <input class="cart-note" type="text" placeholder="備註：不要香菜、加辣…" maxlength="100"
+               value="${esc(c.note || '')}" data-cart-note="${i}">
+      </div>
+      <div class="qty">
+        <button onclick="changeQty(${i}, -1)" aria-label="減少">−</button>
+        <span>${c.qty}</span>
+        <button onclick="changeQty(${i}, 1)" aria-label="增加">＋</button>
+      </div>
+      <div class="cart-sub">${fmtMoney(c.price * c.qty)}</div>
+    </div>`).join('');
+}
+
+function renderMyOrderCard() {
+  const o = state.myOrder;
+  return `
+    <div class="card">
+      <h2>✅ 你已經點好了 <span class="hint">${fmtTime(o.updatedAt || o.createdAt)}</span></h2>
+      ${o.items.map((it) => `
+        <div class="sum-row">
+          <span>${esc(it.name)}${it.note ? `<span class="cart-meta">（${esc(it.note)}）</span>` : ''} × ${it.qty}</span>
+          <span>${fmtMoney(it.price * it.qty)}</span>
+        </div>`).join('')}
+      ${o.note ? `<div class="cart-meta" style="margin-top:8px">備註：${esc(o.note)}</div>` : ''}
+      <div class="sum-total"><span>你要付</span><span>${fmtMoney(o.total)}</span></div>
+      <div class="row" style="margin-top:14px">
+        <button class="ghost" onclick="startEdit()">修改</button>
+        <button class="danger" onclick="removeMyOrder()">刪除</button>
+      </div>
+    </div>`;
+}
+
+/** 只換掉「大家點了什麼」的內容，不碰使用者正在填的表單 */
+function refreshEveryone() {
+  const card = document.getElementById('everyoneCard');
+  if (card) card.outerHTML = renderEveryoneCard();
+  else render();
+}
+
+function renderEveryoneCard() {
+  const grand = state.orders.reduce((a, o) => a + o.total, 0);
+  const myName = getMyName();
+
+  return `
+    <div class="card" id="everyoneCard">
+      <h2>大家點了什麼 <span class="hint">每 8 秒更新</span></h2>
+      <div class="stats">
+        <span><b>${state.orders.length}</b> 人已點</span>
+        <span>目前總計 <b>${fmtMoney(grand)}</b></span>
+      </div>
+      ${state.orders.length === 0
+        ? '<div class="empty">還沒有人點餐，當第一個吧！</div>'
+        : state.orders.map((o) => `
+            <div class="order-line ${o.name === myName ? 'mine' : ''}">
+              <span class="who">${esc(o.name)}</span>
+              <span class="what">${esc(itemsText(o.items))}</span>
+              <span class="amt">${fmtMoney(o.total)}</span>
+            </div>`).join('')}
+    </div>`;
+}
+
+function renderStickyBar() {
+  let bar = document.getElementById('stickyBar');
+  const showBar = isOpen() && (!state.myOrder || state.editing);
+
+  if (!showBar) {
+    if (bar) bar.remove();
+    return;
+  }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'stickyBar';
+    bar.className = 'sticky-bar';
+    document.body.appendChild(bar);
+  }
+
+  const total = cartTotal();
+  const count = state.cart.reduce((a, c) => a + c.qty, 0);
+  bar.innerHTML = `
+    <div class="wrap">
+      <div class="sticky-total">
+        <div class="t">${fmtMoney(total)}</div>
+        <div class="s">${count} 份</div>
+      </div>
+      <button onclick="submit()" ${count === 0 ? 'disabled' : ''}>
+        ${state.editing ? '儲存修改' : '送出訂單'}
+      </button>
+    </div>`;
+}
+
+// ─── 購物車操作 ───────────────────────────────────────────────────────────────
+function cartTotal() {
+  return state.cart.reduce((a, c) => a + c.price * c.qty, 0);
+}
+
+function itemsText(items) {
+  return items.map((it) => {
+    const q = it.qty > 1 ? ` x${it.qty}` : '';
+    const n = it.note ? `(${it.note})` : '';
+    return it.name + n + q;
+  }).join('、');
+}
+
+function addItem(itemId) {
+  const m = state.menu.find((x) => x.itemId === itemId);
+  if (!m) return;
+
+  // 同品項且沒有備註的就直接加數量，有備註的視為不同客製
+  const existing = state.cart.find((c) => c.itemId === itemId && !c.note);
+  if (existing) existing.qty += 1;
+  else state.cart.push({ itemId: m.itemId, name: m.name, price: m.price, qty: 1, note: '' });
+
+  refreshPicker();
+}
+
+function addCustom() {
+  const nameEl = document.getElementById('customName');
+  const priceEl = document.getElementById('customPrice');
+  const name = (nameEl.value || '').trim();
+  const price = parseInt(priceEl.value, 10);
+
+  if (!name) { showToast('請輸入品項名稱', true); nameEl.focus(); return; }
+  if (isNaN(price) || price < 0) { showToast('請輸入正確金額', true); priceEl.focus(); return; }
+
+  state.cart.push({ itemId: '', name, price, qty: 1, note: '' });
+  nameEl.value = '';
+  priceEl.value = '';
+  refreshPicker();
+}
+
+function changeQty(index, delta) {
+  const c = state.cart[index];
+  if (!c) return;
+  c.qty += delta;
+  if (c.qty <= 0) state.cart.splice(index, 1);
+  refreshPicker();
+}
+
+function repeatLast() {
+  const last = loadLastOrder(state.session.restaurantId);
+  if (!last.length) { showToast('沒有找到上次的訂單', true); return; }
+  state.cart = last.map((it) => ({ ...it }));
+  refreshPicker();
+  showToast('已帶入上次點的餐');
+}
+
+/** 只重繪點餐區塊，不動整頁（避免名字輸入框失焦） */
+function refreshPicker() {
+  captureNotes();
+  const cartList = document.getElementById('cartList');
+  if (cartList) cartList.innerHTML = renderCart();
+
+  // 菜單卡片上的「已加 N」標記
+  const menuGrid = document.querySelector('.menu-grid');
+  if (menuGrid) {
+    menuGrid.querySelectorAll('.menu-item').forEach((el, i) => {
+      const m = state.menu[i];
+      const inCart = state.cart.find((c) => c.itemId === m.itemId);
+      const badge = el.querySelector('.badge');
+      if (inCart && !badge) {
+        el.insertAdjacentHTML('beforeend', `<span class="badge">已加 ${inCart.qty}</span>`);
+      } else if (inCart && badge) {
+        badge.textContent = `已加 ${inCart.qty}`;
+      } else if (!inCart && badge) {
+        badge.remove();
+      }
+    });
+  }
+  bindCartInputs();
+  renderStickyBar();
+}
+
+function bindCartInputs() {
+  document.querySelectorAll('[data-cart-note]').forEach((el) => {
+    el.oninput = () => {
+      const i = parseInt(el.dataset.cartNote, 10);
+      if (state.cart[i]) state.cart[i].note = el.value;
+    };
+  });
+}
+
+/** 重繪購物車前先把使用者已輸入的備註存回 state */
+function captureNotes() {
+  document.querySelectorAll('[data-cart-note]').forEach((el) => {
+    const i = parseInt(el.dataset.cartNote, 10);
+    if (state.cart[i]) state.cart[i].note = el.value;
+  });
+}
+
+// ─── 送出 / 修改 / 刪除 ───────────────────────────────────────────────────────
+async function submit() {
+  captureNotes();
+  const name = (document.getElementById('nameInput')?.value || getMyName()).trim();
+  if (!name) { showToast('請先填你的名字', true); document.getElementById('nameInput')?.focus(); return; }
+  if (state.cart.length === 0) { showToast('購物車是空的', true); return; }
+  if (!isOpen()) { showToast('已經停止收單囉', true); render(); return; }
+
+  // 提醒重名，但不擋（可能真的有兩個小明）
+  const dup = state.orders.find((o) => o.name === name && o.orderId !== state.myOrder?.orderId);
+  if (dup && !state.editing) {
+    if (!confirm(`已經有一筆「${name}」的訂單了，要再送一筆嗎？\n（如果那是你的單，請按取消，改用「修改」）`)) return;
+  }
+
+  setMyName(name);
+  isBusy = true;
+  const btn = document.querySelector('#stickyBar button');
+  if (btn) { btn.disabled = true; btn.textContent = '送出中…'; }
+
+  try {
+    const payload = {
+      action:      state.editing ? 'updateOrder' : 'submitOrder',
+      sessionId:   state.session.sessionId,
+      name,
+      clientToken: getClientToken(),
+      items:       state.cart.map((c) => ({ name: c.name, price: c.price, qty: c.qty, note: c.note || '' })),
+      note:        document.getElementById('orderNote')?.value || '',
+    };
+    if (state.editing) payload.orderId = state.myOrder.orderId;
+
+    const data = await gasPost(payload);
+    if (data.status === 'error') throw new Error(data.error);
+
+    syncClock(data.serverNow);
+    state.rev = data.rev;
+    state.orders = data.orders || [];
+    saveLastOrder(state.session.restaurantId, state.cart);
+
+    state.editing = false;
+    state.cart = [];
+    detectMyOrder();
+    render();
+    showToast(payload.action === 'updateOrder' ? '訂單已更新' : '訂單送出成功！');
+  } catch (e) {
+    showToast(e.message || '送出失敗，請重試', true);
+    if (btn) { btn.disabled = false; btn.textContent = state.editing ? '儲存修改' : '送出訂單'; }
+  } finally {
+    isBusy = false;
+  }
+}
+
+function startEdit() {
+  state.editing = true;
+  state.cart = state.myOrder.items.map((it) => ({
+    itemId: '', name: it.name, price: it.price, qty: it.qty, note: it.note || '',
+  }));
+  render();
+}
+
+function cancelEdit() {
+  state.editing = false;
+  state.cart = [];
+  render();
+}
+
+async function removeMyOrder() {
+  if (!confirm('確定要刪除你的訂單嗎？')) return;
+  isBusy = true;
+  try {
+    const data = await gasPost({
+      action:      'deleteOrder',
+      orderId:     state.myOrder.orderId,
+      clientToken: getClientToken(),
+    });
+    if (data.status === 'error') throw new Error(data.error);
+
+    syncClock(data.serverNow);
+    state.rev = data.rev;
+    state.orders = data.orders || [];
+    state.myOrder = null;
+    state.cart = [];
+    render();
+    showToast('訂單已刪除');
+  } catch (e) {
+    showToast(e.message || '刪除失敗', true);
+  } finally {
+    isBusy = false;
+  }
+}
+
+// ─── 彙整 ─────────────────────────────────────────────────────────────────────
+function aggregateByItem(orders) {
+  const map = {};
+  orders.forEach((o) => {
+    o.items.forEach((it) => {
+      // 同名不同備註要分開列，店家才知道哪一份要客製
+      const key = `${it.name}||${it.price}||${it.note || ''}`;
+      if (!map[key]) map[key] = { name: it.name, price: it.price, note: it.note || '', qty: 0, subtotal: 0 };
+      map[key].qty += it.qty;
+      map[key].subtotal += it.price * it.qty;
+    });
+  });
+  return Object.values(map).sort((a, b) => b.qty - a.qty || (a.name < b.name ? -1 : 1));
+}
+
+function copySummary() {
+  const byItem = aggregateByItem(state.orders);
+  const summary = {
+    session:     state.session,
+    restaurant:  state.restaurant,
+    byItem,
+    byPerson:    state.orders.map((o) => ({ name: o.name, items: o.items, total: o.total, note: o.note })),
+    grandTotal:  state.orders.reduce((a, o) => a + o.total, 0),
+    totalQty:    byItem.reduce((a, i) => a + i.qty, 0),
+    peopleCount: state.orders.length,
+  };
+  copyText(summaryTextForShop(summary) + '\n\n' + summaryTextForMoney(summary));
+}
+</script>
+</body>
+</html>

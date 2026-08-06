@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>主揪頁 - 午餐訂單</title>
+<style>
+:root {
+  --primary-orange: #FF7F3F;
+  --secondary-orange: #FF9966;
+  --accent-orange: #FFB380;
+  --light-bg: #FFF5F0;
+  --white: #FFFFFF;
+  --text-dark: #3D3D3D;
+  --text-light: #6B6B6B;
+  --border-light: #FFE8DC;
+  --danger: #E04F4F;
+  --ok: #3FA35F;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', 'PingFang TC', 'PingFang SC', 'Microsoft JhengHei', sans-serif;
+  background: var(--light-bg); color: var(--text-dark); line-height: 1.6;
+}
+.wrap { max-width: 900px; margin: 0 auto; padding: 0 14px 40px; }
+
+.topbar {
+  background: linear-gradient(135deg, var(--primary-orange), var(--secondary-orange));
+  color: #fff; padding: 16px 14px;
+}
+.topbar .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 0; }
+.topbar h1 { font-size: 1.2rem; font-weight: 700; }
+.topbar .sub { font-size: .78rem; opacity: .9; }
+.topbar a { color: #fff; font-size: .82rem; text-decoration: none; border-bottom: 1px solid rgba(255,255,255,.5); }
+
+.tabnav { background: #fff; border-bottom: 1px solid var(--border-light); position: sticky; top: 0; z-index: 50; }
+.tabnav .wrap { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 0; }
+.tabnav button {
+  background: none; border: none; padding: 12px 14px; font-size: .88rem; cursor: pointer;
+  color: var(--text-light); border-bottom: 3px solid transparent; white-space: nowrap;
+  font-family: inherit; border-radius: 0;
+}
+.tabnav button.active { color: var(--primary-orange); border-bottom-color: var(--primary-orange); font-weight: 600; }
+
+.card {
+  background: #fff; border: 1px solid var(--border-light); border-radius: 10px;
+  padding: 16px; margin-top: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.05);
+}
+.card h2 {
+  font-size: 1rem; font-weight: 600; color: var(--primary-orange); margin-bottom: 12px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+}
+.card h2 .hint { font-size: .75rem; font-weight: 400; color: var(--text-light); }
+
+label.field { display: block; font-size: .8rem; color: var(--text-light); margin: 10px 0 4px; }
+input[type=text], input[type=number], input[type=datetime-local], select, textarea {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border-light);
+  border-radius: 8px; font-size: 16px; font-family: inherit; background: #fff; color: var(--text-dark);
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-orange); outline-offset: -1px; }
+
+button {
+  font-family: inherit; font-size: .9rem; cursor: pointer; border: none; border-radius: 8px;
+  padding: 10px 16px; background: var(--primary-orange); color: #fff; font-weight: 600;
+  transition: filter .15s, transform .1s; min-height: 40px;
+}
+button:hover:not(:disabled) { filter: brightness(1.06); }
+button:active:not(:disabled) { transform: scale(.98); }
+button:disabled { background: #ccc; cursor: not-allowed; }
+button.ghost { background: #fff; color: var(--primary-orange); border: 1px solid var(--accent-orange); }
+button.subtle { background: var(--border-light); color: var(--text-dark); }
+button.danger { background: var(--danger); }
+button.sm { padding: 6px 12px; font-size: .8rem; min-height: 32px; }
+
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.row > .grow { flex: 1; min-width: 140px; }
+
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.chips button { background: var(--border-light); color: var(--text-dark); font-size: .78rem; padding: 5px 12px; min-height: 30px; }
+
+.share-box {
+  background: #FFF8F4; border: 1px dashed var(--accent-orange); border-radius: 8px;
+  padding: 12px; margin-top: 12px; word-break: break-all; font-size: .84rem;
+}
+
+.status-pill { display: inline-block; border-radius: 99px; padding: 2px 12px; font-size: .76rem; font-weight: 600; }
+.status-pill.open { background: #E5F6EA; color: var(--ok); }
+.status-pill.closed { background: #EEE; color: var(--text-light); }
+
+table { width: 100%; border-collapse: collapse; font-size: .87rem; }
+th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border-light); vertical-align: top; }
+th { font-size: .76rem; color: var(--text-light); font-weight: 600; letter-spacing: .04em; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.paid td { opacity: .48; text-decoration: line-through; }
+.table-scroll { overflow-x: auto; }
+
+.stats { display: flex; gap: 22px; flex-wrap: wrap; font-size: .82rem; color: var(--text-light); margin-bottom: 12px; }
+.stats b { color: var(--primary-orange); font-size: 1.15rem; }
+
+.empty { color: var(--text-light); font-size: .87rem; text-align: center; padding: 22px 0; }
+.loading { text-align: center; padding: 40px 0; color: var(--text-light); }
+
+.item-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+.item-row:last-child { border-bottom: none; }
+.item-row.off { opacity: .45; }
+.item-row .info { flex: 1; min-width: 0; }
+.item-row .info .n { font-weight: 600; font-size: .92rem; }
+.item-row .info .p { color: var(--primary-orange); font-size: .84rem; }
+.toggle {
+  width: 44px; height: 24px; border-radius: 99px; background: #ddd; position: relative;
+  padding: 0; min-height: 24px; flex: 0 0 auto;
+}
+.toggle::after {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+  border-radius: 50%; background: #fff; transition: .2s;
+}
+.toggle.on { background: var(--ok); }
+.toggle.on::after { transform: translateX(20px); }
+
+.toast {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%) translateY(-8px);
+  background: var(--text-dark); color: #fff; padding: 10px 20px; border-radius: 99px;
+  font-size: 14px; opacity: 0; transition: .25s; pointer-events: none; z-index: 200;
+  max-width: 90vw; text-align: center;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.error { background: var(--danger); }
+
+pre.plain {
+  background: #FAFAFA; border: 1px solid var(--border-light); border-radius: 8px;
+  padding: 12px; font-size: .82rem; white-space: pre-wrap; word-break: break-word;
+  font-family: 'SF Mono', Consolas, monospace; max-height: 340px; overflow: auto;
+}
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap">
+    <div>
+      <h1>🍱 午餐主揪頁</h1>
+      <div class="sub">開單 · 收單 · 彙整</div>
+    </div>
+    <a href="lunch.html">前往點餐頁 →</a>
+  </div>
+</div>
+
+<div class="tabnav">
+  <div class="wrap">
+    <button data-tab="session" class="active" onclick="switchTab('session')">開單／收單</button>
+    <button data-tab="summary" onclick="switchTab('summary')">彙整</button>
+    <button data-tab="menu" onclick="switchTab('menu')">餐廳菜單</button>
+    <button data-tab="history" onclick="switchTab('history')">歷史紀錄</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div id="tab-session" class="tab-panel active"><div class="loading">載入中…</div></div>
+  <div id="tab-summary" class="tab-panel"><div class="loading">載入中…</div></div>
+  <div id="tab-menu"    class="tab-panel"><div class="loading">載入中…</div></div>
+  <div id="tab-history" class="tab-panel"><div class="loading">載入中…</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="lunch.js"></script>
+<script>
+const LS_PAID = 'lunch_paid_';   // + sessionId，收錢勾選只存本機
+
+let state = {
+  session: null,
+  restaurant: null,
+  orders: [],
+  rev: -1,
+  restaurants: [],
+  menuRestaurantId: '',
+  summary: null,
+  tab: 'session',
+  stopCountdown: null,
+  countdownFor: null,
+};
+
+const POLL_INTERVAL = 8000;
+let isPolling = false;
+let isBusy = false;
+
+init();
+
+async function init() {
+  // 餐廳清單要先到，開單表單的下拉選單才有東西可選
+  await loadRestaurants();
+  await loadSession();
+  renderMenuTab();
+  setInterval(poll, POLL_INTERVAL);
+}
+
+// ─── 載入 ─────────────────────────────────────────────────────────────────────
+async function loadSession() {
+  try {
+    const data = await gasGet({ action: 'getBootstrap' });
+    if (data.status === 'error') throw new Error(data.error);
+
+    syncClock(data.serverNow);
+    state.session    = data.session;
+    state.restaurant = data.restaurant;
+    state.orders     = data.orders || [];
+    state.rev        = data.session ? data.session.rev : -1;
+    renderSessionTab();
+  } catch (e) {
+    document.getElementById('tab-session').innerHTML =
+      `<div class="card">載入失敗：${esc(e.message)}<br><br><button onclick="location.reload()">重新整理</button></div>`;
+  }
+}
+
+async function loadRestaurants() {
+  try {
+    const data = await gasGet({ action: 'getRestaurants' });
+    if (data.status === 'error') throw new Error(data.error);
+    state.restaurants = data.restaurants || [];
+    if (!state.menuRestaurantId && state.restaurants.length) {
+      state.menuRestaurantId = state.restaurants[0].restaurantId;
+    }
+  } catch (e) {
+    showToast('餐廳清單載入失敗', true);
+  }
+}
+
+async function poll() {
+  if (isPolling || isBusy || !state.session) return;
+  isPolling = true;
+  try {
+    const data = await gasGet({ action: 'poll', sessionId: state.session.sessionId, rev: state.rev });
+    if (data.status === 'error') return;
+
+    syncClock(data.serverNow);
+    state.session = data.session;
+    if (data.changed) {
+      state.rev = data.rev;
+      state.orders = data.orders || [];
+    }
+    renderSessionTab();
+    if (state.tab === 'summary' && data.changed) renderSummaryTab();
+  } catch (e) {
+    // 網路瞬斷不吵，下一輪補上
+  } finally {
+    isPolling = false;
+  }
+}
+
+// ─── 分頁 ─────────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  state.tab = name;
+  document.querySelectorAll('.tab-panel').forEach((el) => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.querySelectorAll('.tabnav button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.tab === name);
+  });
+
+  if (name === 'summary') renderSummaryTab();
+  if (name === 'menu')    renderMenuTab();
+  if (name === 'history') renderHistoryTab();
+}
+
+function isOpen() {
+  return !!state.session && state.session.status === 'open' && state.session.closeAt > serverTime();
+}
+
+// ─── Tab 1：開單／收單 ────────────────────────────────────────────────────────
+function renderSessionTab() {
+  const el = document.getElementById('tab-session');
+  el.innerHTML = state.session && isOpen()
+    ? renderRunning() + renderNewSessionForm(true)
+    : renderNewSessionForm(false) + (state.session ? renderLastSession() : '');
+
+  if (isOpen()) mountCountdown();
+  else if (state.stopCountdown) { state.stopCountdown(); state.stopCountdown = null; state.countdownFor = null; }
+}
+
+function renderRunning() {
+  const s = state.session;
+  const grand = state.orders.reduce((a, o) => a + o.total, 0);
+  const link = location.href.replace(/lunch_admin\.html.*$/, '') + 'lunch.html?s=' + encodeURIComponent(s.sessionId);
+
+  return `
+    <div class="card">
+      <h2>
+        ${esc(s.title)}
+        <span class="status-pill open">收單中</span>
+      </h2>
+      <div class="stats">
+        <span>餐廳 <b style="font-size:1rem">${esc(state.restaurant ? state.restaurant.name : '—')}</b></span>
+        <span>已點 <b>${state.orders.length}</b> 人</span>
+        <span>總金額 <b>${fmtMoney(grand)}</b></span>
+        <span>剩餘 <b id="adminCountdown">--:--</b></span>
+      </div>
+      <div class="row">
+        <button class="danger" onclick="closeNow()">立即停止收單</button>
+        <button class="ghost" onclick="extend(10)">延長 10 分鐘</button>
+        <button class="ghost" onclick="extend(30)">延長 30 分鐘</button>
+      </div>
+      <div class="share-box">
+        分享這個連結給大家點餐：<br>
+        <strong>${esc(link)}</strong>
+        <div style="margin-top:8px"><button class="sm" onclick="copyText('${esc(link)}')">複製連結</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>目前訂單 <span class="hint">每 8 秒更新，可代改／代刪</span></h2>
+      ${state.orders.length === 0 ? '<div class="empty">還沒有人點餐</div>' : `
+      <div class="table-scroll"><table>
+        <thead><tr><th>姓名</th><th>品項</th><th class="num">金額</th><th></th></tr></thead>
+        <tbody>${state.orders.map((o) => `
+          <tr>
+            <td><strong>${esc(o.name)}</strong>${o.note ? `<div class="hint" style="font-size:.75rem;color:var(--text-light)">${esc(o.note)}</div>` : ''}</td>
+            <td>${esc(itemsText(o.items))}</td>
+            <td class="num">${fmtMoney(o.total)}</td>
+            <td class="num"><button class="danger sm" onclick="adminDelete('${esc(o.orderId)}','${esc(o.name)}')">刪除</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>`}
+    </div>`;
+}
+
+function renderLastSession() {
+  const s = state.session;
+  const grand = state.orders.reduce((a, o) => a + o.total, 0);
+  return `
+    <div class="card">
+      <h2>上一場 <span class="status-pill closed">已收單</span></h2>
+      <div class="stats">
+        <span>${esc(s.title)}</span>
+        <span><b>${state.orders.length}</b> 人</span>
+        <span><b>${fmtMoney(grand)}</b></span>
+      </div>
+      <div class="row">
+        <button class="ghost" onclick="switchTab('summary')">看彙整清單</button>
+        <button class="subtle" onclick="extend(15)">重新開放 15 分鐘</button>
+      </div>
+    </div>`;
+}
+
+function renderNewSessionForm(hasRunning) {
+  const opts = state.restaurants
+    .filter((r) => r.active)
+    .map((r) => `<option value="${esc(r.restaurantId)}">${esc(r.name)}</option>`).join('');
+
+  return `
+    <div class="card">
+      <h2>開新的一場 ${hasRunning ? '<span class="hint">目前已有一場收單中，需先停止</span>' : ''}</h2>
+      ${state.restaurants.filter((r) => r.active).length === 0
+        ? '<div class="empty">還沒有餐廳，請先到「餐廳菜單」分頁新增一間。</div>'
+        : `
+        <label class="field">餐廳</label>
+        <select id="newRestaurant" ${hasRunning ? 'disabled' : ''}>${opts}</select>
+
+        <label class="field">標題</label>
+        <input type="text" id="newTitle" placeholder="留空自動用「餐廳名 午餐」" maxlength="100" ${hasRunning ? 'disabled' : ''}>
+
+        <label class="field">截止時間</label>
+        <input type="datetime-local" id="newCloseAt" value="${defaultCloseAtValue()}" ${hasRunning ? 'disabled' : ''}>
+        <div class="chips">
+          <button onclick="bumpCloseAt(15)" ${hasRunning ? 'disabled' : ''}>+15 分</button>
+          <button onclick="bumpCloseAt(30)" ${hasRunning ? 'disabled' : ''}>+30 分</button>
+          <button onclick="setCloseAtHour(11, 0)" ${hasRunning ? 'disabled' : ''}>今天 11:00</button>
+          <button onclick="setCloseAtHour(11, 30)" ${hasRunning ? 'disabled' : ''}>今天 11:30</button>
+        </div>
+
+        <label class="field">你的名字（主揪）</label>
+        <input type="text" id="newCreatedBy" value="${esc(getMyName())}" maxlength="30" ${hasRunning ? 'disabled' : ''}>
+
+        <div style="margin-top:14px">
+          <button onclick="createSession()" ${hasRunning ? 'disabled' : ''}>開單</button>
+        </div>`}
+    </div>`;
+}
+
+function mountCountdown() {
+  const s = state.session;
+  if (state.stopCountdown && state.countdownFor === s.closeAt) return;
+  if (state.stopCountdown) state.stopCountdown();
+  state.countdownFor = s.closeAt;
+  state.stopCountdown = startCountdown(s.closeAt, (remain) => {
+    const el = document.getElementById('adminCountdown');
+    if (el) el.textContent = fmtRemain(remain);
+  }, () => renderSessionTab());
+}
+
+/** datetime-local 需要本地時間字串（不能用 toISOString，那是 UTC） */
+function toLocalInputValue(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function defaultCloseAtValue() {
+  const d = new Date(serverTime());
+  d.setHours(11, 0, 0, 0);
+  // 已經過 11:00 就改成 30 分鐘後
+  if (d.getTime() <= serverTime()) return toLocalInputValue(new Date(serverTime() + 30 * 60000));
+  return toLocalInputValue(d);
+}
+
+function bumpCloseAt(minutes) {
+  const el = document.getElementById('newCloseAt');
+  const base = el.value ? new Date(el.value).getTime() : serverTime();
+  el.value = toLocalInputValue(new Date(Math.max(base, serverTime()) + minutes * 60000));
+}
+
+function setCloseAtHour(h, m) {
+  const d = new Date(serverTime());
+  d.setHours(h, m, 0, 0);
+  document.getElementById('newCloseAt').value = toLocalInputValue(d);
+}
+
+async function createSession() {
+  const restaurantId = document.getElementById('newRestaurant').value;
+  const closeAtRaw   = document.getElementById('newCloseAt').value;
+  if (!restaurantId) { showToast('請選餐廳', true); return; }
+  if (!closeAtRaw)   { showToast('請設定截止時間', true); return; }
+
+  const closeAt = new Date(closeAtRaw).getTime();
+  if (closeAt <= serverTime()) { showToast('截止時間必須晚於現在', true); return; }
+
+  const createdBy = (document.getElementById('newCreatedBy').value || '').trim();
+  if (createdBy) setMyName(createdBy);
+
+  isBusy = true;
+  try {
+    const data = await gasPost({
+      action: 'createSession',
+      restaurantId,
+      closeAt,
+      title: document.getElementById('newTitle').value,
+      createdBy,
+    });
+    if (data.status === 'error') throw new Error(data.error);
+    showToast('開單成功！把連結分享給大家');
+    await loadSession();
+  } catch (e) {
+    showToast(e.message || '開單失敗', true);
+  } finally {
+    isBusy = false;
+  }
+}
+
+async function closeNow() {
+  if (!confirm('確定要立即停止收單嗎？之後大家就不能再點了。')) return;
+  isBusy = true;
+  try {
+    const data = await gasPost({ action: 'closeSession', sessionId: state.session.sessionId });
+    if (data.status === 'error') throw new Error(data.error);
+    showToast('已停止收單');
+    await loadSession();
+    switchTab('summary');
+  } catch (e) {
+    showToast(e.message || '操作失敗', true);
+  } finally {
+    isBusy = false;
+  }
+}
+
+async function extend(minutes) {
+  isBusy = true;
+  try {
+    const data = await gasPost({ action: 'extendSession', sessionId: state.session.sessionId, minutes });
+    if (data.status === 'error') throw new Error(data.error);
+    showToast(`已延長 ${minutes} 分鐘`);
+    await loadSession();
+  } catch (e) {
+    showToast(e.message || '操作失敗', true);
+  } finally {
+    isBusy = false;
+  }
+}
+
+async function adminDelete(orderId, name) {
+  if (!confirm(`確定要刪除「${name}」的訂單嗎？`)) return;
+  isBusy = true;
+  try {
+    const data = await gasPost({ action: 'deleteOrder', orderId, isAdmin: true });
+    if (data.status === 'error') throw new Error(data.error);
+    state.rev = data.rev;
+    state.orders = data.orders || [];
+    renderSessionTab();
+    showToast('已刪除');
+  } catch (e) {
+    showToast(e.message || '刪除失敗', true);
+  } finally {
+    isBusy = false;
+  }
+}
+
+function itemsText(items) {
+  return items.map((it) => {
+    const q = it.qty > 1 ? ` x${it.qty}` : '';
+    const n = it.note ? `(${it.note})` : '';
+    return it.name + n + q;
+  }).join('、');
+}
+
+// ─── Tab 2：彙整 ──────────────────────────────────────────────────────────────
+async function renderSummaryTab() {
+  const el = document.getElementById('tab-summary');
+  if (!state.session) {
+    el.innerHTML = '<div class="card"><div class="empty">還沒有任何訂單場次</div></div>';
+    return;
+  }
+
+  try {
+    const data = await gasGet({ action: 'getSummary', sessionId: state.session.sessionId });
+    if (data.status === 'error') throw new Error(data.error);
+    syncClock(data.serverNow);
+    state.summary = data;
+  } catch (e) {
+    el.innerHTML = `<div class="card">彙整載入失敗：${esc(e.message)}</div>`;
+    return;
+  }
+
+  const s = state.summary;
+  const paid = loadPaid(s.session.sessionId);
+
+  el.innerHTML = `
+    <div class="card">
+      <h2>${esc(s.session.title)}
+        <span class="status-pill ${s.session.status === 'open' ? 'open' : 'closed'}">
+          ${s.session.status === 'open' ? '收單中（數字還會變）' : '已收單'}
+        </span>
+      </h2>
+      <div class="stats">
+        <span>餐廳 <b style="font-size:1rem">${esc(s.restaurant ? s.restaurant.name : '—')}</b></span>
+        ${s.restaurant && s.restaurant.phone ? `<span>電話 <b style="font-size:1rem">${esc(s.restaurant.phone)}</b></span>` : ''}
+        <span><b>${s.peopleCount}</b> 人</span>
+        <span><b>${s.totalQty}</b> 份</span>
+        <span>總計 <b>${fmtMoney(s.grandTotal)}</b></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>給店家：品項彙總
+        <button class="ghost sm" onclick="copyShop()">複製文字</button>
+      </h2>
+      ${s.byItem.length === 0 ? '<div class="empty">沒有訂單</div>' : `
+      <div class="table-scroll"><table>
+        <thead><tr><th>品項</th><th class="num">單價</th><th class="num">數量</th><th class="num">小計</th><th>誰點的</th></tr></thead>
+        <tbody>${s.byItem.map((it) => `
+          <tr>
+            <td><strong>${esc(it.name)}</strong>${it.note ? `<div style="font-size:.76rem;color:var(--danger)">※ ${esc(it.note)}</div>` : ''}</td>
+            <td class="num">${fmtMoney(it.price)}</td>
+            <td class="num"><strong>${it.qty}</strong></td>
+            <td class="num">${fmtMoney(it.subtotal)}</td>
+            <td style="font-size:.78rem;color:var(--text-light)">${esc(it.who.join('、'))}</td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot><tr>
+          <th>合計</th><th></th><th class="num">${s.totalQty}</th>
+          <th class="num">${fmtMoney(s.grandTotal)}</th><th></th>
+        </tr></tfoot>
+      </table></div>`}
+    </div>
+
+    <div class="card">
+      <h2>給收錢：每人應付
+        <button class="ghost sm" onclick="copyMoney()">複製文字</button>
+      </h2>
+      ${s.byPerson.length === 0 ? '<div class="empty">沒有訂單</div>' : `
+      <div class="table-scroll"><table>
+        <thead><tr><th style="width:56px;white-space:nowrap">已付</th><th>姓名</th><th>品項</th><th class="num">應付</th></tr></thead>
+        <tbody>${s.byPerson.map((p) => `
+          <tr id="pay-${esc(p.orderId)}" class="${paid[p.orderId] ? 'paid' : ''}">
+            <td><input type="checkbox" style="width:20px;height:20px" ${paid[p.orderId] ? 'checked' : ''}
+                       onchange="togglePaid('${esc(p.orderId)}', this.checked)"></td>
+            <td><strong>${esc(p.name)}</strong>${p.note ? `<div style="font-size:.76rem;color:var(--text-light)">${esc(p.note)}</div>` : ''}</td>
+            <td>${esc(itemsText(p.items))}</td>
+            <td class="num">${fmtMoney(p.total)}</td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot><tr><th></th><th>合計</th><th></th><th class="num">${fmtMoney(s.grandTotal)}</th></tr></tfoot>
+      </table></div>
+      <div style="margin-top:10px;font-size:.78rem;color:var(--text-light)">
+        「已付」只記在這台裝置，不會同步給其他人。
+      </div>`}
+    </div>
+
+    <div class="card">
+      <h2>純文字版 <span class="hint">直接貼 LINE 群組</span></h2>
+      <pre class="plain" id="plainText">${esc(summaryTextForShop(s))}\n\n${esc(summaryTextForMoney(s))}</pre>
+      <div style="margin-top:10px"><button onclick="copyAll()">複製全部</button></div>
+    </div>`;
+}
+
+function loadPaid(sessionId) {
+  try { return JSON.parse(localStorage.getItem(LS_PAID + sessionId) || '{}'); } catch (e) { return {}; }
+}
+
+function togglePaid(orderId, checked) {
+  const sid = state.summary.session.sessionId;
+  const paid = loadPaid(sid);
+  if (checked) paid[orderId] = true; else delete paid[orderId];
+  localStorage.setItem(LS_PAID + sid, JSON.stringify(paid));
+  const row = document.getElementById('pay-' + orderId);
+  if (row) row.classList.toggle('paid', checked);
+}
+
+function copyShop()  { copyText(summaryTextForShop(state.summary)); }
+function copyMoney() { copyText(summaryTextForMoney(state.summary)); }
+function copyAll()   { copyText(summaryTextForShop(state.summary) + '\n\n' + summaryTextForMoney(state.summary)); }
+
+// ─── Tab 3：餐廳菜單 ──────────────────────────────────────────────────────────
+function renderMenuTab() {
+  const el = document.getElementById('tab-menu');
+  const current = state.restaurants.find((r) => r.restaurantId === state.menuRestaurantId);
+
+  el.innerHTML = `
+    <div class="card">
+      <h2>新增餐廳</h2>
+      <div class="row">
+        <input class="grow" type="text" id="rName" placeholder="餐廳名稱" maxlength="60">
+        <input class="grow" type="text" id="rPhone" placeholder="電話（選填）" maxlength="30">
+      </div>
+      <label class="field">備註（選填）</label>
+      <input type="text" id="rNote" placeholder="例如：滿 10 個免運、11:30 前要下訂" maxlength="200">
+      <div style="margin-top:12px"><button onclick="addRestaurant()">新增餐廳</button></div>
+    </div>
+
+    ${state.restaurants.length === 0 ? '' : `
+    <div class="card">
+      <h2>維護菜單</h2>
+      <label class="field">選擇餐廳</label>
+      <select id="menuRestaurant" onchange="state.menuRestaurantId=this.value; renderMenuTab()">
+        ${state.restaurants.map((r) => `
+          <option value="${esc(r.restaurantId)}" ${r.restaurantId === state.menuRestaurantId ? 'selected' : ''}>
+            ${esc(r.name)}${r.active ? '' : '（停用）'}
+          </option>`).join('')}
+      </select>
+
+      ${current ? `
+        <div class="row" style="margin-top:12px">
+          <input class="grow" type="text" id="mName" placeholder="品項名稱" maxlength="60">
+          <input type="number" id="mPrice" placeholder="價格" min="0" max="100000" inputmode="numeric" style="width:110px">
+          <input type="text" id="mCategory" placeholder="分類（選填）" maxlength="40" style="width:130px">
+          <button onclick="addMenuItem()">加入</button>
+        </div>
+
+        <div style="margin-top:14px">
+          ${(current.menu || []).length === 0
+            ? '<div class="empty">這間餐廳還沒有品項</div>'
+            : current.menu.map((m) => `
+              <div class="item-row ${m.available ? '' : 'off'}">
+                <div class="info">
+                  <div class="n">${esc(m.name)}</div>
+                  <div class="p">${fmtMoney(m.price)}${m.category ? ' · ' + esc(m.category) : ''}</div>
+                </div>
+                <button class="toggle ${m.available ? 'on' : ''}"
+                        title="${m.available ? '供應中' : '已停售'}"
+                        onclick="toggleItem('${esc(m.itemId)}', ${!m.available})"></button>
+                <button class="danger sm" onclick="removeItem('${esc(m.itemId)}','${esc(m.name)}')">刪除</button>
+              </div>`).join('')}
+        </div>` : ''}
+    </div>`}`;
+}
+
+async function addRestaurant() {
+  const name = (document.getElementById('rName').value || '').trim();
+  if (!name) { showToast('請輸入餐廳名稱', true); return; }
+
+  try {
+    const data = await gasPost({
+      action: 'upsertRestaurant',
+      name,
+      phone: document.getElementById('rPhone').value,
+      note:  document.getElementById('rNote').value,
+    });
+    if (data.status === 'error') throw new Error(data.error);
+    await loadRestaurants();
+    state.menuRestaurantId = data.restaurant.restaurantId;
+    renderMenuTab();
+    renderSessionTab();
+    showToast('餐廳已新增');
+  } catch (e) {
+    showToast(e.message || '新增失敗', true);
+  }
+}
+
+async function addMenuItem() {
+  const name  = (document.getElementById('mName').value || '').trim();
+  const price = parseInt(document.getElementById('mPrice').value, 10);
+  if (!name) { showToast('請輸入品項名稱', true); return; }
+  if (isNaN(price) || price < 0) { showToast('請輸入正確價格', true); return; }
+
+  try {
+    const data = await gasPost({
+      action: 'upsertMenuItem',
+      restaurantId: state.menuRestaurantId,
+      name, price,
+      category: document.getElementById('mCategory').value,
+    });
+    if (data.status === 'error') throw new Error(data.error);
+    await loadRestaurants();
+    renderMenuTab();
+    showToast('品項已新增');
+  } catch (e) {
+    showToast(e.message || '新增失敗', true);
+  }
+}
+
+async function toggleItem(itemId, available) {
+  const r = state.restaurants.find((x) => x.restaurantId === state.menuRestaurantId);
+  const m = r && r.menu.find((x) => x.itemId === itemId);
+  if (!m) return;
+
+  try {
+    const data = await gasPost({
+      action: 'upsertMenuItem',
+      itemId, restaurantId: state.menuRestaurantId,
+      name: m.name, price: m.price, category: m.category, available,
+    });
+    if (data.status === 'error') throw new Error(data.error);
+    m.available = available;
+    renderMenuTab();
+    showToast(available ? '已上架' : '已停售');
+  } catch (e) {
+    showToast(e.message || '操作失敗', true);
+  }
+}
+
+async function removeItem(itemId, name) {
+  if (!confirm(`確定要刪除「${name}」嗎？`)) return;
+  try {
+    const data = await gasPost({ action: 'deleteMenuItem', itemId });
+    if (data.status === 'error') throw new Error(data.error);
+    await loadRestaurants();
+    renderMenuTab();
+    showToast('已刪除');
+  } catch (e) {
+    showToast(e.message || '刪除失敗', true);
+  }
+}
+
+// ─── Tab 4：歷史紀錄 ──────────────────────────────────────────────────────────
+async function renderHistoryTab() {
+  const el = document.getElementById('tab-history');
+  el.innerHTML = '<div class="loading">載入中…</div>';
+
+  try {
+    const data = await gasGet({ action: 'getHistory', limit: 30 });
+    if (data.status === 'error') throw new Error(data.error);
+    syncClock(data.serverNow);
+
+    el.innerHTML = `
+      <div class="card">
+        <h2>過往訂單 <span class="hint">最近 ${data.sessions.length} 場</span></h2>
+        ${data.sessions.length === 0 ? '<div class="empty">還沒有紀錄</div>' : `
+        <div class="table-scroll"><table>
+          <thead><tr><th>日期</th><th>標題</th><th>餐廳</th><th class="num">人數</th><th class="num">總額</th></tr></thead>
+          <tbody>${data.sessions.map((s) => `
+            <tr>
+              <td>${fmtTime(s.createdAt)}</td>
+              <td>${esc(s.title)}</td>
+              <td>${esc(s.restaurantName)}</td>
+              <td class="num">${s.orderCount}</td>
+              <td class="num">${fmtMoney(s.total)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table></div>`}
+      </div>
+
+      <div class="card">
+        <h2>最常吃的餐廳</h2>
+        ${data.topRestaurants.length === 0 ? '<div class="empty">還沒有紀錄</div>' :
+          data.topRestaurants.slice(0, 10).map((r) => `
+            <div class="sum-row" style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--border-light)">
+              <span>${esc(r.name)}</span><span><strong>${r.times}</strong> 次</span>
+            </div>`).join('')}
+      </div>
+
+      <div class="card">
+        <h2>累計花費 <span class="hint">全部場次加總</span></h2>
+        ${data.topSpenders.length === 0 ? '<div class="empty">還沒有紀錄</div>' :
+          data.topSpenders.slice(0, 20).map((p) => `
+            <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--border-light)">
+              <span>${esc(p.name)}</span><span>${fmtMoney(p.total)}</span>
+            </div>`).join('')}
+      </div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="card">載入失敗：${esc(e.message)}</div>`;
+  }
+}
+</script>
+</body>
+</html>
