@@ -231,6 +231,7 @@ async function init() {
 // 用「跑完一輪再排下一輪」而不是 setInterval：後端偶爾會慢到好幾秒，
 // 固定間隔會讓請求開始重疊、在 Apps Script 那邊堆成一排執行中。
 let pollTimer = null;
+let pollToken = 0;   // 用來確保「同時只有一條輪詢鏈活著」
 
 function pollDelay() {
   if (document.hidden) return 60000;                                    // 沒人在看
@@ -238,12 +239,23 @@ function pollDelay() {
   return POLL_INTERVAL;
 }
 
+/**
+ * 一定要用 token 作廢舊的鏈：clearTimeout 取消不了一個「已經觸發、正在
+ * await poll() 」的迴圈，它跑完還是會自己排下一輪。少了這道，每次切回
+ * 前景就多一條鏈，請求速率不斷翻倍，最後把後端塞爆。
+ */
 function startPolling() {
+  const token = ++pollToken;
   clearTimeout(pollTimer);
-  pollTimer = setTimeout(async function loop() {
-    await poll();
-    pollTimer = setTimeout(loop, pollDelay());
-  }, pollDelay());
+
+  (function loop() {
+    pollTimer = setTimeout(async () => {
+      if (token !== pollToken) return;
+      await poll();
+      if (token !== pollToken) return;
+      loop();
+    }, pollDelay());
+  })();
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -757,11 +769,12 @@ async function handleDmUpload(input) {
   renderMenuTab();
 
   try {
+    // 辨識本來就要跑十幾秒、遇到壅塞還會重試，用一般的逾時會誤砍
     const data = await gasPost({
       action: 'parseMenuImage',
       base64Data: img.base64,
       mimeType: img.mimeType,
-    });
+    }, GAS_TIMEOUT_SLOW_MS);
     if (data.status === 'error') throw new Error(data.error);
 
     state.scan = {
@@ -977,7 +990,8 @@ async function applyScan() {
   btn.textContent = '儲存中…';
 
   try {
-    const data = await gasPost(payload);
+    // 這支要把原圖上傳到 Drive，比一般寫入久
+    const data = await gasPost(payload, GAS_TIMEOUT_SLOW_MS);
     if (data.status === 'error') throw new Error(data.error);
 
     await loadRestaurants();

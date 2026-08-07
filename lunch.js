@@ -8,17 +8,37 @@
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbz9haHSLuwnAbzA4qBFY8dayuUooiStARUSwjA-XvsPuKmauSHqCLrfRTDYBOlLZHwX1w/exec';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
-async function gasGet(params) {
+//
+// 一定要有逾時。Apps Script 在忙的時候會把請求排隊，實際看過排到 190 秒的；
+// 沒有逾時的話前端就真的乾等，使用者看到的是「載入中」轉三分鐘。
+// 放掉一個排隊中的請求沒有損失——輪詢下一輪就會拿到最新資料。
+
+const GAS_TIMEOUT_MS = 20000;        // 一般讀寫
+const GAS_TIMEOUT_SLOW_MS = 120000;  // 菜單辨識：本來就要跑十幾秒，還可能重試
+
+async function gasFetch_(url, init, timeoutMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs || GAS_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { ...(init || {}), signal: ctrl.signal });
+    return await res.json();
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('連線逾時，伺服器忙碌中，請稍後再試');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function gasGet(params, timeoutMs) {
   const qs = new URLSearchParams(params).toString();
-  const res = await fetch(`${GAS_URL}?${qs}`);
-  return res.json();
+  return gasFetch_(`${GAS_URL}?${qs}`, null, timeoutMs);
 }
 
 // 注意：刻意不帶 Content-Type header。加了會觸發 CORS preflight，
 // 而 Google Apps Script Web App 不回應 OPTIONS 請求。
-async function gasPost(body) {
-  const res = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify(body) });
-  return res.json();
+async function gasPost(body, timeoutMs) {
+  return gasFetch_(GAS_URL, { method: 'POST', body: JSON.stringify(body) }, timeoutMs);
 }
 
 // ─── 本機身分 ─────────────────────────────────────────────────────────────────

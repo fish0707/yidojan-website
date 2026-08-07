@@ -298,6 +298,7 @@ function detectMyOrder() {
 // 固定間隔會讓請求開始重疊、在 Apps Script 那邊堆成一排執行中。
 
 let pollTimer = null;
+let pollToken = 0;   // 用來確保「同時只有一條輪詢鏈活著」
 
 function pollDelay() {
   // 沒人在看的分頁不需要即時：切到背景就把頻率降下來
@@ -307,12 +308,25 @@ function pollDelay() {
   return POLL_INTERVAL;
 }
 
+/**
+ * 重排輪詢。
+ *
+ * 這裡一定要用 token 作廢舊的鏈：clearTimeout 取消不了一個「已經觸發、
+ * 正在 await poll() 」的迴圈，它跑完還是會自己排下一輪。少了這道，
+ * 每次切回前景就多一條鏈，請求速率會不斷翻倍，最後把後端塞爆。
+ */
 function startPolling() {
+  const token = ++pollToken;
   clearTimeout(pollTimer);
-  pollTimer = setTimeout(async function loop() {
-    await poll();
-    pollTimer = setTimeout(loop, pollDelay());
-  }, pollDelay());
+
+  (function loop() {
+    pollTimer = setTimeout(async () => {
+      if (token !== pollToken) return;   // 已經有新的鏈接手，這條就此結束
+      await poll();
+      if (token !== pollToken) return;
+      loop();
+    }, pollDelay());
+  })();
 }
 
 // 切回前景時立刻補一次，不用等下一輪，看起來才即時

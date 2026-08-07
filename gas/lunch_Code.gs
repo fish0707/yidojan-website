@@ -384,12 +384,24 @@ function findActiveSession_() {
 }
 
 /** 場次是否還能收單（時間到就順手把 status 落地成 closed） */
-function sessionOpen_(session) {
+/**
+ * 這場還在收單嗎？
+ *
+ * persist 只有「已經拿著鎖的寫入路徑」才可以傳 true。
+ *
+ * 以前這裡不管誰呼叫都會直接寫回試算表，包括 poll 這種讀取路徑。結果是：
+ * 場次截止的那一瞬間，所有人的輪詢同時走到這裡，同時對同一列發動沒有鎖
+ * 保護的寫入，全部卡在一起。實際看過兩個 doGet 各卡 190 秒、然後同時結束。
+ *
+ * 而這個寫入其實是多餘的——sessionPayload_ 和 findActiveSession_ 都是直接
+ * 用 closeAt 判斷，不看試算表裡存的 status。所以讀取路徑只要改記憶體就好。
+ */
+function sessionOpen_(session, persist) {
   if (!session) return false;
   if (session.status !== 'open') return false;
   if (toMillis_(session.closeAt) <= Date.now()) {
     session.status = 'closed';
-    writeRow_(SHEET_SESSIONS, session._row, session);
+    if (persist) writeRow_(SHEET_SESSIONS, session._row, session);
     return false;
   }
   return true;
@@ -667,7 +679,7 @@ function normalizeItems_(rawItems) {
 function submitOrder_(body) {
   var session = findSession_(clean_(body.sessionId, 64));
   if (!session) return err('NOT_FOUND', '找不到這場訂單');
-  if (!sessionOpen_(session)) return err('CLOSED', '已經停止收單囉');
+  if (!sessionOpen_(session, true)) return err('CLOSED', '已經停止收單囉');
 
   var name  = clean_(body.name, 30);
   var token = clean_(body.clientToken, 64);
@@ -722,7 +734,7 @@ function updateOrder_(body) {
   if (!row || truthy_(row.deleted)) return err('NOT_FOUND', '找不到這筆訂單');
 
   var session = findSession_(row.sessionId);
-  if (!sessionOpen_(session) && body.isAdmin !== true) return err('CLOSED', '已經停止收單，無法修改');
+  if (!sessionOpen_(session, true) && body.isAdmin !== true) return err('CLOSED', '已經停止收單，無法修改');
   if (!canModify_(row, body)) return err('FORBIDDEN', '這不是你的訂單，無法修改');
 
   var norm = normalizeItems_(body.items);
@@ -750,7 +762,7 @@ function deleteOrder_(body) {
   if (!row || truthy_(row.deleted)) return err('NOT_FOUND', '找不到這筆訂單');
 
   var session = findSession_(row.sessionId);
-  if (!sessionOpen_(session) && body.isAdmin !== true) return err('CLOSED', '已經停止收單，無法刪除');
+  if (!sessionOpen_(session, true) && body.isAdmin !== true) return err('CLOSED', '已經停止收單，無法刪除');
   if (!canModify_(row, body)) return err('FORBIDDEN', '這不是你的訂單，無法刪除');
 
   row.deleted   = true;          // 軟刪除，保留稽核痕跡
@@ -771,7 +783,7 @@ function buildSessionView_(session) {
   if (!session) {
     return { status: 'success', serverNow: Date.now(), session: null, orders: [], restaurant: null, menu: [] };
   }
-  sessionOpen_(session); // 順手把逾時的場次落地成 closed
+  sessionOpen_(session);   // 讀取路徑：只改記憶體，不寫試算表
   var restaurant = findRestaurant_(session.restaurantId);
   return {
     status:     'success',
