@@ -437,11 +437,19 @@ function createSession_(body) {
   var restaurant = findRestaurant_(restaurantId);
   if (!restaurant) return err('NOT_FOUND', '找不到這間餐廳');
 
+  Logger.log('[開單] 收到請求：restaurantId=' + restaurantId
+    + '（' + restaurant.name + '）closeAt=' + new Date(closeAt).toLocaleString('zh-TW'));
+
   // 同時只允許一場收單中，避免大家點到不同場
   var rows = readAll_(SHEET_SESSIONS);
   for (var i = 0; i < rows.length; i++) {
     if (rows[i].status === 'open' && toMillis_(rows[i].closeAt) > Date.now()) {
-      return err('ALREADY_OPEN', '目前已有一場收單中：' + rows[i].title);
+      // 這是「選了新餐廳卻還是看到舊那場」最常見的原因，記下來才查得到
+      Logger.log('[開單] ✗ 被擋下：第 ' + rows[i]._row + ' 列還在收單中'
+        + '（' + rows[i].title + '，restaurantId=' + rows[i].restaurantId
+        + '，closeAt=' + new Date(toMillis_(rows[i].closeAt)).toLocaleString('zh-TW') + '）');
+      return err('ALREADY_OPEN', '目前已有一場收單中：' + rows[i].title
+        + '。請先按「立即停止收單」，才能開新的一場。');
     }
   }
 
@@ -456,6 +464,8 @@ function createSession_(body) {
     rev:          1
   };
   appendRow_(SHEET_SESSIONS, session);
+  Logger.log('[開單] ✓ 已建立 ' + session.sessionId + '：' + session.title
+    + '（restaurantId=' + session.restaurantId + '）');
 
   return {
     status:    'success',
@@ -1359,6 +1369,79 @@ function pickFlashModel_(list) {
 }
 
 // ─── 首次安裝：建立四張工作表與範例資料 ───────────────────────────────────────
+/**
+ * 診斷「開單選了 A 餐廳，畫面卻顯示 B 餐廳」這類問題。
+ *
+ * 在 Apps Script 編輯器的函式下拉選單選 diagnoseSessions 執行，然後看「執行紀錄」。
+ * 它只讀資料、不會改任何東西。
+ */
+function diagnoseSessions() {
+  var log = [];
+  function say(s) { log.push(s); Logger.log(s); }
+
+  var now = Date.now();
+  say('=== 場次診斷 ===');
+  say('現在時間：' + new Date(now).toLocaleString('zh-TW') + '（' + now + '）');
+
+  // ── 餐廳對照表 ──
+  var rests = readAll_(SHEET_RESTAURANTS);
+  var nameOf = {};
+  say('\n【餐廳】共 ' + rests.length + ' 間');
+  for (var i = 0; i < rests.length; i++) {
+    nameOf[String(rests[i].restaurantId)] = rests[i].name;
+    say('  ' + rests[i].restaurantId + '  =  ' + rests[i].name
+        + (truthy_(rests[i].active) ? '' : '（停用）'));
+  }
+
+  // ── 每一場的原始值與解析後的值 ──
+  var rows = readAll_(SHEET_SESSIONS);
+  say('\n【場次】共 ' + rows.length + ' 場（由上到下就是試算表的列序）');
+  for (var j = 0; j < rows.length; j++) {
+    var s = rows[j];
+    var closeAt   = toMillis_(s.closeAt);
+    var createdAt = toMillis_(s.createdAt);
+    var rid       = String(s.restaurantId);
+    var isOpenNow = s.status === 'open' && closeAt > now;
+
+    say('  第 ' + s._row + ' 列  ' + (isOpenNow ? '★ 收單中' : '  已結束') + '  ' + s.sessionId);
+    say('      餐廳：' + rid + ' → ' + (nameOf[rid] || '⚠️ 找不到這個 restaurantId'));
+    say('      標題：' + s.title);
+    say('      status 欄＝' + s.status
+        + '　closeAt 原始值＝' + JSON.stringify(s.closeAt) + ' → ' + (closeAt ? new Date(closeAt).toLocaleString('zh-TW') : '⚠️ 解析不出時間'));
+    say('      createdAt 原始值＝' + JSON.stringify(s.createdAt) + ' → ' + (createdAt ? new Date(createdAt).toLocaleString('zh-TW') : '⚠️ 解析不出時間'));
+  }
+
+  // ── 後端實際會挑哪一場 ──
+  var picked = findActiveSession_();
+  say('\n【findActiveSession_ 挑中的場次】');
+  if (!picked) {
+    say('  （沒有任何場次）');
+  } else {
+    var prid = String(picked.restaurantId);
+    say('  第 ' + picked._row + ' 列  ' + picked.sessionId);
+    say('  餐廳：' + prid + ' → ' + (nameOf[prid] || '⚠️ 找不到'));
+    say('  ← 主揪頁與點餐頁看到的就是這一場');
+  }
+
+  // ── 開單會不會被擋 ──
+  say('\n【現在按「開單」會怎樣】');
+  var blocker = null;
+  for (var k = 0; k < rows.length; k++) {
+    if (rows[k].status === 'open' && toMillis_(rows[k].closeAt) > now) { blocker = rows[k]; break; }
+  }
+  if (blocker) {
+    say('  ⚠️ 會被擋下：「目前已有一場收單中：' + blocker.title + '」');
+    say('     （第 ' + blocker._row + ' 列，餐廳 ' + (nameOf[String(blocker.restaurantId)] || '?') + '）');
+    say('     這就是為什麼你選了新餐廳、畫面卻還是舊的那一場。');
+    say('     → 先在主揪頁按「立即停止收單」，或把那一列的 status 改成 closed，再開新的一場。');
+  } else {
+    say('  ✅ 不會被擋，可以正常開新的一場');
+  }
+
+  say('\n=== 診斷結束 ===');
+  return log.join('\n');
+}
+
 function setupSheets() {
   [SHEET_RESTAURANTS, SHEET_MENU_ITEMS, SHEET_SESSIONS, SHEET_ORDERS].forEach(function (n) { sheet_(n); });
 

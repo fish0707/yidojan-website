@@ -506,6 +506,9 @@ async function createSession() {
     await loadSession();
   } catch (e) {
     showToast(e.message || '開單失敗', true);
+    // 開單失敗時也要刷新：最常見的失敗是「已經有一場在收單中」，
+    // 不刷新的話畫面還停在表單上，使用者根本看不出實際跑的是哪一場餐廳。
+    await loadSession();
   } finally {
     isBusy = false;
   }
