@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>台股當沖選股 — 流動性掃蕩</title>
+<style>
+:root {
+  --bg: #0e1117;
+  --panel: #161b25;
+  --panel-2: #1d2430;
+  --line: #2a3341;
+  --text: #e6edf3;
+  --muted: #8b98a9;
+  --long: #ff5d5d;   /* 台股習慣：紅漲綠跌 */
+  --short: #35c46b;
+  --accent: #f0a500;
+  --warn: #ffb020;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  background: var(--bg); color: var(--text); line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+.wrap { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+h1 { font-size: 1.4rem; letter-spacing: .02em; }
+h2 { font-size: 1.05rem; margin-bottom: .6rem; color: var(--accent); }
+h3 { font-size: .92rem; color: var(--muted); font-weight: 600; margin-bottom: .4rem; }
+a { color: var(--accent); }
+
+header { border-bottom: 1px solid var(--line); background: var(--panel); }
+header .sub { color: var(--muted); font-size: .85rem; }
+
+.disclaimer {
+  background: #2a1e12; border: 1px solid #5a3d16; color: #f0d5a8;
+  border-radius: 8px; padding: .8rem 1rem; margin: 1rem 0; font-size: .84rem;
+}
+.disclaimer b { color: var(--warn); }
+.disclaimer ul { margin: .4rem 0 0 1.1rem; }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+button {
+  font: inherit; font-size: .88rem; padding: .5rem .9rem; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #1a1200; font-weight: 700; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .8rem; }
+label.field { display: block; font-size: .78rem; color: var(--muted); }
+label.field input, label.field select {
+  display: block; width: 100%; margin-top: .25rem; font: inherit; font-size: .88rem;
+  padding: .4rem .5rem; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text);
+}
+label.check { display: flex; align-items: center; gap: .45rem; font-size: .84rem; cursor: pointer; }
+
+#status { font-size: .84rem; color: var(--muted); margin-top: .6rem; white-space: pre-wrap; }
+.err { color: var(--warn); }
+
+table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+th, td { padding: .5rem .4rem; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: .76rem; }
+th.left, td.left { text-align: left; }
+tr.row { cursor: pointer; }
+tr.row:hover td { background: var(--panel-2); }
+.tablescroll { overflow-x: auto; }
+
+.badge { display: inline-block; padding: .1rem .45rem; border-radius: 4px; font-size: .74rem; font-weight: 700; }
+.badge.long { background: rgba(255,93,93,.15); color: var(--long); }
+.badge.short { background: rgba(53,196,107,.15); color: var(--short); }
+.badge.warn { background: rgba(255,176,32,.15); color: var(--warn); }
+
+.bar { height: 6px; width: 60px; background: var(--panel-2); border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+
+.card { text-align: left; white-space: normal; }
+.card .cols > * { min-width: 0; }
+tr.row.active td { background: rgba(240,165,0,.1); }
+tr.row.active td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.card .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+.kv { display: flex; justify-content: space-between; gap: 1rem; padding: .22rem 0; font-size: .85rem; border-bottom: 1px dashed rgba(255,255,255,.06); }
+.kv span:first-child { color: var(--muted); }
+.kv b { font-variant-numeric: tabular-nums; }
+.big { font-size: 1.15rem; }
+
+.levels { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0; }
+.levels button { font-size: .8rem; padding: .3rem .6rem; }
+.levels button.on { border-color: var(--accent); background: rgba(240,165,0,.15); }
+
+ol.checklist { list-style: none; font-size: .85rem; }
+ol.checklist li { padding: .3rem 0; border-bottom: 1px dashed rgba(255,255,255,.06); }
+ol.checklist label { display: flex; gap: .5rem; align-items: flex-start; cursor: pointer; }
+
+.note { font-size: .78rem; color: var(--muted); margin-top: .5rem; }
+.hint { color: var(--warn); font-size: .8rem; }
+textarea {
+  width: 100%; min-height: 130px; font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: .8rem; padding: .6rem; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); resize: vertical;
+}
+details.explain summary { cursor: pointer; color: var(--accent); font-size: .9rem; padding: .3rem 0; }
+details.explain p, details.explain li { font-size: .85rem; color: var(--muted); }
+details.explain ol, details.explain ul { margin-left: 1.1rem; }
+footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-align: center; }
+.hidden { display: none; }
+@media (max-width: 600px) {
+  .wrap { padding: .7rem; }
+  th, td { padding: .45rem .3rem; font-size: .8rem; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>台股當沖選股 · 流動性掃蕩</h1>
+    <div class="sub">收盤後挑出隔天的候選標的，並算好進場、停損與可買張數</div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="disclaimer">
+    <b>先把話講清楚，這關係到你的錢：</b>
+    <ul>
+      <li>這套規則原本是用在 <b>XAU/USD（黃金）</b>的 15 分鐘線，原文回測 98 筆、勝率 <b>76.53%</b>——不是 95%，而且原文自己聲明<b>沒有計入滑價、手續費與下單延遲</b>，樣本數也不大。移植到台股個股後，勝率必須由你自己用模擬單重新驗證。</li>
+      <li><b>現股當沖需要券商開通資格</b>（開戶滿 3 個月且近一年成交達 10 筆）。當沖沒沖掉就要補足全額股款，否則就是違約交割——每張作戰卡都有標「未沖掉需備款」這個數字，請先確認你補得出來。</li>
+      <li>NT$3,000 在這裡是<b>單筆最大可虧金額</b>，不是買進金額。這個網站不會叫你把 3,000 元拿去買股票。</li>
+      <li>1:1 的獲利目標在台股會被來回約 0.3% 的手續費與證交稅吃掉一大塊。每張卡都會算「損益兩平價差」與「期望值」，<b>期望值是負的標的會被自動剔除</b>。</li>
+      <li>本頁是計算工具，不是投資建議，也不保證任何勝率。</li>
+    </ul>
+  </div>
+
+  <div class="panel">
+    <div class="toolbar">
+      <button class="primary" id="btn-fetch">抓取今日收盤並篩選</button>
+      <button id="btn-demo">載入示範資料</button>
+      <button id="btn-paste-toggle">手動貼上資料</button>
+      <button id="btn-settings-toggle">篩選設定</button>
+      <button id="btn-clear">清除本地歷史</button>
+    </div>
+    <div id="status">尚未載入資料。連得到證交所就按「抓取今日收盤」；如果被 CORS 或公司網路擋住，改用「手動貼上資料」，計算流程完全一樣。</div>
+  </div>
+
+  <div class="panel hidden" id="paste-panel">
+    <h2>手動貼上資料</h2>
+    <p class="note">
+      支援兩種格式：<br>
+      1. 直接把 <a href="https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL" target="_blank" rel="noopener">證交所 STOCK_DAY_ALL</a> 的整段 JSON 貼進來（在瀏覽器開那個網址，全選複製）。<br>
+      2. 逗號或 Tab 分隔的表格，每行：<code>代號,名稱,開,高,低,收,量(張)</code>
+    </p>
+    <textarea id="paste-input" placeholder="[{&quot;Code&quot;:&quot;2317&quot;,&quot;Name&quot;:&quot;鴻海&quot;,...}]&#10;或&#10;2317,鴻海,203,206,202.5,205.5,32000"></textarea>
+    <div class="toolbar" style="margin-top:.6rem">
+      <button class="primary" id="btn-paste-run">用這份資料篩選</button>
+      <span class="note" id="paste-note"></span>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="settings-panel">
+    <h2>篩選設定</h2>
+    <div class="grid">
+      <label class="field">單筆風險預算（元）<input type="number" id="set-riskBudget" min="500" step="100"></label>
+      <label class="field">手續費折數（0.6 = 六折）<input type="number" id="set-feeDiscount" min="0.1" max="1" step="0.05"></label>
+      <label class="field">最低手續費（元）<input type="number" id="set-minFee" min="0" step="1"></label>
+      <label class="field">股價下限<input type="number" id="set-minPrice" min="1" step="1"></label>
+      <label class="field">股價上限<input type="number" id="set-maxPrice" min="1" step="1"></label>
+      <label class="field">最低成交金額（億）<input type="number" id="set-minTurnoverY" min="0" step="0.5"></label>
+      <label class="field">最低成交量（張）<input type="number" id="set-minVolumeLots" min="0" step="500"></label>
+      <label class="field">最低當沖比重（%）<input type="number" id="set-minDayTradeRatioPct" min="0" max="100" step="1"></label>
+      <label class="field">單檔張數上限<input type="number" id="set-maxLots" min="1" step="1"></label>
+      <label class="field">最多列出幾檔<input type="number" id="set-maxCandidates" min="1" step="1"></label>
+      <label class="field">期望值假設勝率（%）<input type="number" id="set-assumedWinRatePct" min="1" max="99" step="1"></label>
+    </div>
+    <div class="grid" style="margin-top:.8rem">
+      <label class="check"><input type="checkbox" id="set-includeTwse"> 含上市（TWSE）</label>
+      <label class="check"><input type="checkbox" id="set-includeTpex"> 含上櫃（TPEx）</label>
+      <label class="check"><input type="checkbox" id="set-requireDayTradeList"> 只留在當沖標的清單內的股票</label>
+      <label class="check"><input type="checkbox" id="set-requirePositiveExpectancy"> 剔除期望值為負的標的</label>
+    </div>
+    <p class="note">設定會存在這台裝置的瀏覽器裡。「期望值假設勝率」只影響排序參考值，改高不會讓你真的變準。</p>
+  </div>
+
+  <div class="panel" id="result-panel">
+    <h2>隔日候選標的</h2>
+    <div class="tablescroll">
+      <table id="result-table">
+        <thead>
+          <tr>
+            <th class="left">#</th>
+            <th class="left">代號 / 名稱</th>
+            <th>分數</th>
+            <th>方向</th>
+            <th>收盤</th>
+            <th>漲跌%</th>
+            <th>振幅%</th>
+            <th>成交額(億)</th>
+            <th>當沖比</th>
+            <th>進場</th>
+            <th>停損</th>
+            <th>張數</th>
+            <th>最大虧損</th>
+          </tr>
+        </thead>
+        <tbody id="result-body">
+          <tr><td colspan="13" class="left" style="color:var(--muted)">還沒有資料</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">點任一列展開作戰卡。分數只代表「條件符合程度」，不是勝率，也不是報酬預測。</p>
+  </div>
+
+  <!-- 作戰卡故意放在表格外面：表格在手機上要橫向捲動，卡片如果塞在 td 裡會被裁掉 -->
+  <div class="panel hidden" id="card-panel"></div>
+
+  <details class="explain panel">
+    <summary>這套策略在做什麼？（四個步驟）</summary>
+    <ol>
+      <li><b>30 EMA 定方向</b>：收盤價在 30 日均線上方，隔天<b>只找做多</b>（掃低後收回）；在下方就<b>只找做空</b>（掃高後收回）。不要逆著均線方向硬做。</li>
+      <li><b>畫出細部支撐壓力</b>：用 Left/Right Bars = 1 的轉折點（原策略特地把預設的 15 改成 1），抓出貼近短線結構的價位——流動性掃蕩往往就發生在這種小轉折上，不是一眼看得出來的大關卡。</li>
+      <li><b>等掃蕩，不是等破線</b>：這是整套策略的核心。價格跌破支撐<b>不進場</b>；要等到那根 15 分鐘 K 棒<b>收盤又收回支撐上方</b>才算數。意思是主力把支撐下方的停損單掃過一輪、吃完籌碼後才真正反手往上推。少了這一步確認，抓到的往往是還沒掃完的假訊號。</li>
+      <li><b>進場、停損、1:1 目標</b>：做多的進場點設在確認收回那根 K 棒的<b>高點</b>；停損放在剛才<b>掃低的最低點</b>；停利距離設成跟停損距離一樣遠（1:1）。刻意用這麼保守的報酬比，是因為這套策略賭的是命中率，不是單筆賺很多——目標設得近才容易達標，拖越久被反打的機率越高。</li>
+    </ol>
+    <p style="margin-top:.6rem"><b>移植到台股時改了什麼：</b>原策略的 Volume Threshold 20 在日線上沒有直接對應，這裡用「該轉折當日成交量 ≥ 近 20 日均量」近似（畫面上標 <b>*</b> 的價位就是）。另外加了台股才有的東西：價格檔位對齊、當沖資格與稅費、漲跌停與處置股排除、以及用 3,000 元風險預算反推張數。</p>
+  </details>
+
+  <details class="explain panel">
+    <summary>資料是怎麼來的？為什麼第一次用要等幾天？</summary>
+    <p>今日收盤價量直接向證交所開放 API 取得。但 30 日均線、ATR 與轉折點需要<b>歷史日 K</b>，逐檔去抓歷史很容易被擋，所以這個網站改成：<b>每次抓到全市場收盤表就在你的瀏覽器裡存一份</b>（IndexedDB），日積月累成自己的歷史庫。</p>
+    <p>因此第一次使用時歷史只有 1 天，均線方向的參考性很低，畫面上會標「歷史 N 天」提醒你。連續每天收盤後開一次，大約一個月後 30 日均線才真正到位。這段期間建議只拿它練習辨認訊號，不要下實單。</p>
+    <p>資料來源：證交所 <code>STOCK_DAY_ALL</code>（每日收盤）、<code>TWTB4U</code>（當沖標的與當沖量）、<code>TWTBAU1</code>（暫停先賣後買）、<code>punish</code>（處置股）、櫃買 <code>tpex_mainboard_quotes</code>。若某一份抓不到，該維度會降級處理並在狀態列標明，不會整頁壞掉。</p>
+  </details>
+
+  <footer>
+    本頁為個人試算工具，所有數字僅供參考，不構成投資建議。<br>
+    台股當沖有極高風險，可能在單日內損失超過預期，請自行對每一筆交易負責。
+  </footer>
+</div>
+
+<script src="daytrade.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const SETTINGS_KEY = 'daytrade.settings';
+  const CHECK_KEY = 'daytrade.checks';
+
+  let lastResult = null;
+  let openCode = null;
+
+  // ── 設定存取 ──────────────────────────────────────────────────────────────
+
+  // 畫面欄位跟內部設定的單位不一樣（億 / 百分比比較好填），在這裡轉換。
+  const FIELDS = [
+    ['riskBudget', 'number'], ['feeDiscount', 'number'], ['minFee', 'number'],
+    ['minPrice', 'number'], ['maxPrice', 'number'], ['minVolumeLots', 'number'],
+    ['maxLots', 'number'], ['maxCandidates', 'number'],
+    ['includeTwse', 'bool'], ['includeTpex', 'bool'],
+    ['requireDayTradeList', 'bool'], ['requirePositiveExpectancy', 'bool']
+  ];
+
+  function loadSettings() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'); } catch (e) { saved = {}; }
+    return { ...DEFAULT_SETTINGS, ...saved };
+  }
+
+  function settingsToForm(s) {
+    for (const [key, type] of FIELDS) {
+      const el = $('set-' + key);
+      if (!el) continue;
+      if (type === 'bool') el.checked = !!s[key];
+      else el.value = s[key];
+    }
+    $('set-minTurnoverY').value = (s.minTurnover / 1e8).toFixed(1);
+    $('set-minDayTradeRatioPct').value = Math.round(s.minDayTradeRatio * 100);
+    $('set-assumedWinRatePct').value = Math.round(s.assumedWinRate * 100);
+  }
+
+  function formToSettings() {
+    const s = { ...DEFAULT_SETTINGS };
+    for (const [key, type] of FIELDS) {
+      const el = $('set-' + key);
+      if (!el) continue;
+      if (type === 'bool') s[key] = el.checked;
+      else {
+        const v = Number(el.value);
+        if (isFinite(v)) s[key] = v;
+      }
+    }
+    const turn = Number($('set-minTurnoverY').value);
+    if (isFinite(turn)) s.minTurnover = turn * 1e8;
+    const dt = Number($('set-minDayTradeRatioPct').value);
+    if (isFinite(dt)) s.minDayTradeRatio = dt / 100;
+    const wr = Number($('set-assumedWinRatePct').value);
+    if (isFinite(wr)) s.assumedWinRate = wr / 100;
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) { /* 無痕模式會擋，忽略 */ }
+    return s;
+  }
+
+  // ── 盤中檢查表的打勾狀態（依日期 + 代號存，隔天自動歸零）──────────────────
+
+  function loadChecks() {
+    try { return JSON.parse(localStorage.getItem(CHECK_KEY) || '{}'); } catch (e) { return {}; }
+  }
+  function saveCheck(key, value) {
+    const all = loadChecks();
+    const today = new Date().toISOString().slice(0, 10);
+    if (all.date !== today) { for (const k of Object.keys(all)) delete all[k]; all.date = today; }
+    all[key] = value;
+    try { localStorage.setItem(CHECK_KEY, JSON.stringify(all)); } catch (e) { /* 忽略 */ }
+  }
+  function getCheck(key) {
+    const all = loadChecks();
+    const today = new Date().toISOString().slice(0, 10);
+    return all.date === today && !!all[key];
+  }
+
+  // ── 狀態列 ────────────────────────────────────────────────────────────────
+
+  function setStatus(text, isError) {
+    const el = $('status');
+    el.textContent = text;
+    el.className = isError ? 'err' : '';
+  }
+
+  const fmt = (n, d) => n == null || !isFinite(n) ? '—' : Number(n).toFixed(d == null ? 2 : d);
+  const money = (n) => n == null || !isFinite(n) ? '—' : Math.round(n).toLocaleString('zh-TW');
+
+  // ── 篩選流程 ──────────────────────────────────────────────────────────────
+
+  async function runScreen(quotes, extra, sourceLabel, presetHistory) {
+    const settings = formToSettings();
+    let history = presetHistory;
+    let historyDays = 0;
+
+    if (!history) {
+      const loaded = await loadHistory(90);
+      history = loaded.history;
+      historyDays = loaded.days;
+      if (loaded.error) setStatus('本地歷史庫讀取失敗（' + loaded.error + '），這次只用今天的資料計算。', true);
+    }
+
+    const result = screen(quotes, history, extra, settings);
+    lastResult = result;
+    openCode = null;
+    render(result, settings);
+
+    const r = result.rejected;
+    const lines = [
+      sourceLabel + '：掃描 ' + result.scanned + ' 檔 → 候選 ' + result.candidates.length + ' 檔' +
+        (historyDays ? '（本地歷史 ' + historyDays + ' 個交易日）' : ''),
+      '排除：價格帶 ' + r.price + '、量能不足 ' + r.liquidity + '、漲跌停 ' + r.limit +
+        '、處置股 ' + r.punish + '、非當沖標的/當沖比重低 ' + r.dayTradeList +
+        '、無可用價位 ' + r.noLevel + '、3000 元買不起 ' + r.risk + '、期望值為負 ' + r.expectancy
+    ];
+    setStatus(lines.join('\n'));
+  }
+
+  // ── 畫面 ──────────────────────────────────────────────────────────────────
+
+  function render(result, settings) {
+    const body = $('result-body');
+    body.innerHTML = '';
+    $('card-panel').classList.add('hidden');   // 換了一批資料，舊的卡片就不該還留在畫面上
+    $('card-panel').innerHTML = '';
+    if (!result.candidates.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="13" class="left" style="color:var(--muted)">' +
+        '今天沒有符合條件的標的。這是正常的——當沖不是每天都有好牌，' +
+        '硬要挑一檔出來做才是虧錢的開始。真要放寬，去「篩選設定」調條件，但你等於在降低標準。</td>';
+      body.appendChild(tr);
+      return;
+    }
+
+    result.candidates.forEach((c, i) => {
+      const prev = c.close - (c.change || 0);
+      const chgPct = prev ? (c.change / prev) * 100 : 0;
+      const tr = document.createElement('tr');
+      tr.className = 'row';
+      tr.innerHTML =
+        '<td class="left">' + (i + 1) + '</td>' +
+        '<td class="left"><b>' + c.code + '</b> ' + c.name +
+          (c.dataThin ? ' <span class="badge warn">歷史' + c.historyDays + '天</span>' : '') + '</td>' +
+        '<td><span class="bar"><i style="width:' + c.score.total + '%"></i></span> ' + c.score.total + '</td>' +
+        '<td><span class="badge ' + c.side + '">' + (c.side === 'long' ? '做多' : '做空') + '</span></td>' +
+        '<td>' + fmt(c.close) + '</td>' +
+        '<td style="color:' + (chgPct >= 0 ? 'var(--long)' : 'var(--short)') + '">' + (chgPct >= 0 ? '+' : '') + fmt(chgPct) + '</td>' +
+        '<td>' + fmt(c.metrics.rangePct) + '</td>' +
+        '<td>' + fmt(c.turnover / 1e8, 1) + '</td>' +
+        '<td>' + (c.metrics.dayTradeRatio == null ? '—' : fmt(c.metrics.dayTradeRatio * 100, 0) + '%') + '</td>' +
+        '<td>' + fmt(c.plan.entry) + '</td>' +
+        '<td>' + fmt(c.plan.stop) + '</td>' +
+        '<td>' + c.plan.lots + '</td>' +
+        '<td>' + money(c.plan.netLoss) + '</td>';
+      tr.addEventListener('click', () => toggleCard(c, tr, settings));
+      body.appendChild(tr);
+    });
+  }
+
+  function toggleCard(c, tr, settings) {
+    const panel = $('card-panel');
+    document.querySelectorAll('tr.row').forEach((el) => el.classList.remove('active'));
+    if (openCode === c.code) {          // 再點一次同一列就收起來
+      panel.classList.add('hidden');
+      panel.innerHTML = '';
+      openCode = null;
+      return;
+    }
+    panel.innerHTML = '';
+    panel.appendChild(buildCard(c, settings));
+    panel.classList.remove('hidden');
+    tr.classList.add('active');
+    openCode = c.code;
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function buildCard(c, settings) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const isLong = c.side === 'long';
+    const dirWord = isLong ? '做多' : '做空';
+    const lineWord = isLong ? '支撐' : '壓力';
+    const sweepWord = isLong ? '掃低後收回' : '掃高後收回';
+
+    let selectedLevel = c.levels[0];
+    let plan = c.plan;
+
+    const head = document.createElement('div');
+    head.innerHTML =
+      '<h2>' + c.code + ' ' + c.name + '　<span class="badge ' + c.side + '">' + dirWord + '（' + sweepWord + '）</span>' +
+      (c.shortBlocked ? ' <span class="badge warn">暫停先賣後買，今天不能先空</span>' : '') +
+      (c.dataThin ? ' <span class="badge warn">本地歷史僅 ' + c.historyDays + ' 天，均線方向參考性低</span>' : '') +
+      '</h2>' +
+      '<p class="note">收盤 ' + fmt(c.close) + '、30 EMA ' + fmt(c.metrics.ema30) +
+      '，價格在均線' + (isLong ? '上方 → 隔天只找做多訊號' : '下方 → 隔天只找做空訊號') +
+      '。ATR ' + fmt(c.metrics.atr) + '（' + fmt(c.metrics.atrPct) + '%）。</p>';
+    card.appendChild(head);
+
+    const cols = document.createElement('div');
+    cols.className = 'cols';
+
+    // 1) 要盯的價位
+    const colLevels = document.createElement('div');
+    colLevels.innerHTML = '<h3>① 要盯的' + lineWord + '（點一個來試算）</h3>';
+    const levelBox = document.createElement('div');
+    levelBox.className = 'levels';
+    c.levels.forEach((lv, idx) => {
+      const b = document.createElement('button');
+      b.textContent = lv.label + ' ' + fmt(lv.price) + (lv.strong ? ' ★' : '');
+      b.className = idx === 0 ? 'on' : '';
+      b.addEventListener('click', () => {
+        selectedLevel = lv;
+        levelBox.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
+        b.classList.add('on');
+        recalcFromLevel();
+      });
+      levelBox.appendChild(b);
+    });
+    colLevels.appendChild(levelBox);
+    // 這裡不能用 innerHTML += 補說明文字：那會把整個子樹重新解析一次，
+    // 上面那幾顆按鈕的 click 監聽會被一起洗掉，價位就再也切換不動了。
+    const levelNote = document.createElement('p');
+    levelNote.className = 'note';
+    levelNote.innerHTML = '★ = 該轉折當日成交量高於近 20 日均量，是比較有份量的價位。' +
+      '隔天盯的就是這幾條線：價格<b>' + (isLong ? '跌破後又收回線上' : '衝過後又收回線下') + '</b>才算數。';
+    colLevels.appendChild(levelNote);
+    cols.appendChild(colLevels);
+
+    // 2) 盤中確認後重算
+    const colInput = document.createElement('div');
+    colInput.innerHTML = '<h3>② 盤中確認 K 棒出現後，填進來重算</h3>';
+    const inputs = document.createElement('div');
+    inputs.className = 'grid';
+    inputs.innerHTML =
+      '<label class="field">確認 K 棒最高價<input type="number" step="0.01" id="in-high-' + c.code + '"></label>' +
+      '<label class="field">' + (isLong ? '掃蕩最低價' : '掃蕩最高價') + '<input type="number" step="0.01" id="in-low-' + c.code + '"></label>';
+    colInput.appendChild(inputs);
+    const hint = document.createElement('p');
+    hint.className = 'note';
+    hint.innerHTML = isLong
+      ? '做多：進場 = 確認 K 棒高點 +1 檔；停損 = 掃低最低點 −1 檔。'
+      : '做空：進場 = 確認 K 棒低點 −1 檔；停損 = 掃高最高點 +1 檔。<br>（欄位名稱照 K 棒的高低點填，程式會自動判斷方向）';
+    colInput.appendChild(hint);
+    cols.appendChild(colInput);
+
+    card.appendChild(cols);
+
+    // 3) 數字區
+    const numbers = document.createElement('div');
+    numbers.style.marginTop = '.8rem';
+    card.appendChild(numbers);
+
+    function renderNumbers(source) {
+      const warnLots = plan.lotsCapped
+        ? '<p class="hint">張數已被「單檔張數上限」壓到 ' + plan.lots + ' 張（原本可以 ' + plan.rawLots + ' 張）。</p>' : '';
+      const warnCost = plan.costWarning
+        ? '<p class="hint">⚠ 手續費與證交稅吃掉這筆 1:1 獲利的 ' +
+          Math.round(plan.cost / (plan.stopDistance * plan.shares) * 100) + '%。停損距離太近時，這套策略的優勢會被成本抵銷。</p>' : '';
+      const warnExp = plan.expectancy <= 0
+        ? '<p class="hint">⚠ 用假設勝率 ' + Math.round((settings.assumedWinRate || 0.7653) * 100) + '% 加權後期望值是負的，這筆不值得做。</p>' : '';
+
+      numbers.innerHTML =
+        '<div class="cols">' +
+          '<div>' +
+            '<h3>③ 進場價位（' + source + '）</h3>' +
+            '<div class="kv"><span>進場</span><b class="big" style="color:var(--accent)">' + fmt(plan.entry) + '</b></div>' +
+            '<div class="kv"><span>停損</span><b class="big" style="color:var(--long)">' + fmt(plan.stop) + '</b></div>' +
+            '<div class="kv"><span>目標（1:1）</span><b class="big" style="color:var(--short)">' + fmt(plan.target) + '</b></div>' +
+            '<div class="kv"><span>停損距離</span><b>' + fmt(plan.stopDistance) + ' 元（' + fmt(plan.stopPct) + '%）</b></div>' +
+          '</div>' +
+          '<div>' +
+            '<h3>④ 部位與金額</h3>' +
+            '<div class="kv"><span>可買張數</span><b class="big">' + (plan.tradable ? plan.lots + ' 張' : '不可交易') + '</b></div>' +
+            '<div class="kv"><span>停損出場最大虧損（含成本）</span><b style="color:var(--long)">' + money(plan.netLoss) + ' 元</b></div>' +
+            '<div class="kv"><span>達標獲利（扣完成本）</span><b style="color:var(--short)">' + money(plan.netWin) + ' 元</b></div>' +
+            '<div class="kv"><span>來回成本</span><b>' + money(plan.cost) + ' 元（手續費 ' +
+              money(plan.costDetail.buyFee + plan.costDetail.sellFee) + ' + 證交稅 ' + money(plan.costDetail.tax) + '）</b></div>' +
+            '<div class="kv"><span>損益兩平價差</span><b>' + fmt(plan.breakevenMove) + ' 元（停損距離的 ' +
+              Math.round((plan.breakevenRatio || 0) * 100) + '%）</b></div>' +
+            '<div class="kv"><span>期望值（勝率 ' + Math.round((settings.assumedWinRate || 0.7653) * 100) + '% 加權）</span><b style="color:' +
+              (plan.expectancy > 0 ? 'var(--short)' : 'var(--long)') + '">' + money(plan.expectancy) + ' 元</b></div>' +
+            '<div class="kv"><span>沒沖掉需準備的全額股款</span><b style="color:var(--warn)">' + money(plan.fullPayment) + ' 元</b></div>' +
+          '</div>' +
+        '</div>' + warnLots + warnCost + warnExp;
+    }
+
+    function recalcFromLevel() {
+      const est = estimateLevels(c.side, selectedLevel.price, c.metrics.atr || c.close * 0.02, 2);
+      plan = planTrade(c.side, est.entry, est.stop, settings);
+      renderNumbers('依 ' + selectedLevel.label + ' ' + fmt(selectedLevel.price) + ' 估算，盤中請以實際 K 棒為準');
+    }
+
+    renderNumbers('依 ' + c.levels[0].label + ' ' + fmt(c.levels[0].price) + ' 估算，盤中請以實際 K 棒為準');
+
+    function recalcFromBar() {
+      const hi = Number(document.getElementById('in-high-' + c.code).value);
+      const lo = Number(document.getElementById('in-low-' + c.code).value);
+      if (!isFinite(hi) || !isFinite(lo) || hi <= 0 || lo <= 0) return;
+      if (hi < lo) return;
+      const lv = levelsFromBar(c.side, hi, lo);
+      plan = planTrade(c.side, lv.entry, lv.stop, settings);
+      renderNumbers('依你填入的實際 K 棒計算');
+    }
+    inputs.querySelectorAll('input').forEach((el) => el.addEventListener('input', recalcFromBar));
+
+    // 4) 盤中檢查表
+    const checklist = document.createElement('div');
+    checklist.style.marginTop = '.8rem';
+    const items = [
+      '價格已經' + (isLong ? '跌破' + lineWord : '衝過' + lineWord) + '（掃蕩發生了）',
+      '那根 15 分鐘 K 棒<b>收盤</b>又' + (isLong ? '收回' + lineWord + '上方' : '收回' + lineWord + '下方') + '（不是盤中一度收回，是收盤價）',
+      '此刻價格在 30 EMA ' + (isLong ? '上方' : '下方') + '（沒有逆著均線做）',
+      '不是開盤前 15 分鐘（09:00–09:15 的亂流不做）',
+      '離漲跌停還有距離，不會沖不掉',
+      '今天還沒滿 2 筆單，也還沒連續虧 2 筆'
+    ];
+    checklist.innerHTML = '<h3>⑤ 下單前逐項確認（六項全中才准下單）</h3>';
+    const ol = document.createElement('ol');
+    ol.className = 'checklist';
+    items.forEach((text, idx) => {
+      const key = c.code + ':' + idx;
+      const li = document.createElement('li');
+      const label = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = getCheck(key);
+      box.addEventListener('change', () => saveCheck(key, box.checked));
+      const span = document.createElement('span');
+      span.innerHTML = text;
+      label.appendChild(box);
+      label.appendChild(span);
+      li.appendChild(label);
+      ol.appendChild(li);
+    });
+    checklist.appendChild(ol);
+    card.appendChild(checklist);
+
+    const rules = document.createElement('p');
+    rules.className = 'note';
+    rules.innerHTML = '<b>當日紀律：</b>單日最多 2 筆 · 連續 2 筆停損就收工 · 13:00 後不開新倉 · ' +
+      '13:20 前一定要平倉（<b>沒沖掉就要交割 ' + money(plan.fullPayment) + ' 元</b>）· 不加碼、不凹單、不移動停損。';
+    card.appendChild(rules);
+
+    return card;
+  }
+
+  // ── 事件 ──────────────────────────────────────────────────────────────────
+
+  $('btn-settings-toggle').addEventListener('click', () => $('settings-panel').classList.toggle('hidden'));
+  $('btn-paste-toggle').addEventListener('click', () => $('paste-panel').classList.toggle('hidden'));
+
+  $('btn-fetch').addEventListener('click', async () => {
+    const btn = $('btn-fetch');
+    btn.disabled = true;
+    setStatus('連線證交所中…（第一次抓全市場資料大約需要幾秒）');
+    try {
+      const settings = formToSettings();
+      const { quotes, extra, errors } = await fetchMarketData(settings);
+      if (!quotes.length) {
+        setStatus('沒有抓到任何行情資料。\n' + errors.join('\n') +
+          '\n\n如果錯誤是 CORS 或 Failed to fetch，代表瀏覽器或網路擋掉了對交易所的請求——' +
+          '請改用「手動貼上資料」，計算流程完全一樣。', true);
+        return;
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      quotes.forEach((q) => { q.date = today; });
+      try { await saveDay(today, quotes); } catch (e) { errors.push('本地歷史庫寫入失敗：' + e.message); }
+      await runScreen(quotes, extra, '證交所即時抓取');
+      if (errors.length) {
+        setStatus($('status').textContent + '\n\n部分來源有問題（已降級處理）：\n' + errors.join('\n'));
+      }
+    } catch (e) {
+      setStatus('抓取失敗：' + e.message + '\n請改用「手動貼上資料」。', true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $('btn-paste-run').addEventListener('click', async () => {
+    const { quotes, errors } = parsePasted($('paste-input').value);
+    $('paste-note').textContent = errors.length ? errors.slice(0, 3).join('；') : '';
+    if (!quotes.length) { setStatus('貼上的資料解析不出任何個股。\n' + errors.join('\n'), true); return; }
+    const today = new Date().toISOString().slice(0, 10);
+    quotes.forEach((q) => { q.date = today; });
+    try { await saveDay(today, quotes); } catch (e) { /* 貼上的資料存不進去不影響這次計算 */ }
+    // 貼上的資料沒有當沖清單，把「只留當沖標的」的限制自動放掉，否則會全部被剔除
+    await runScreen(quotes, { dayTrade: null, noShortSell: null, punish: null }, '手動貼上資料');
+    setStatus($('status').textContent +
+      '\n\n注意：手動貼上模式沒有當沖標的清單、處置股與禁先賣後買資料，這三項限制無法自動檢查，請自行確認。');
+  });
+
+  $('btn-demo').addEventListener('click', async () => {
+    const demo = demoData();
+    demo.quotes.forEach((q) => { q.date = '2026-08-11'; });
+    await runScreen(demo.quotes, demo.extra, '示範資料', demo.history);
+    setStatus($('status').textContent +
+      '\n\n這是假造的資料，用來讓你看清楚各種排除規則怎麼運作（含一檔漲停鎖死、一檔量能不足、一檔高價買不起）。不要拿來下單。');
+  });
+
+  $('btn-clear').addEventListener('click', async () => {
+    if (!confirm('確定清除這台裝置上累積的歷史日 K？清掉之後 30 日均線要重新累積。')) return;
+    try {
+      indexedDB.deleteDatabase('daytrade');
+      setStatus('本地歷史已清除。');
+    } catch (e) {
+      setStatus('清除失敗：' + e.message, true);
+    }
+  });
+
+  // ── 起始 ──────────────────────────────────────────────────────────────────
+
+  settingsToForm(loadSettings());
+  loadHistory(90).then((h) => {
+    if (h.days > 0) {
+      setStatus('本地歷史庫已有 ' + h.days + ' 個交易日的資料' +
+        (h.days < 30 ? '（還不足 30 天，均線方向的參考性偏低）' : '') +
+        '。按「抓取今日收盤並篩選」開始。');
+    }
+  }).catch(() => { /* 沒有歷史庫是正常的第一次使用 */ });
+})();
+</script>
+</body>
+</html>
