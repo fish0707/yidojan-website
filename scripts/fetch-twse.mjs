@@ -256,13 +256,21 @@ function latestPossibleTradingDay() {
   return d;
 }
 
-/** 往回列出 n 個「可能的」交易日（只跳過週末；國定假日靠實際抓不到資料來判斷） */
-function candidateDays(n) {
+/**
+ * 往回列出 n 個「可能的」交易日：跳過週末，以及之前已經確認過是假日的日期。
+ *
+ * 這裡只列剛好 n 天很重要。如果多列一些（想說扣掉假日才夠），那些多出來的日期
+ * 每次執行都會被重抓一次、然後又因為超出保留天數被裁掉，等於每天白跑幾十個請求。
+ * 已知假日扣掉之後，n 天就是 n 天。
+ */
+function candidateDays(n, holidays) {
   const out = [];
   const d = latestPossibleTradingDay();
-  while (out.length < n) {
+  let guard = 0;
+  while (out.length < n && guard++ < n * 4) {
+    const date = ymd(d);
     const dow = d.getUTCDay();
-    if (dow !== 0 && dow !== 6) out.push(ymd(d));
+    if (dow !== 0 && dow !== 6 && !holidays.has(date)) out.push(date);
     d.setUTCDate(d.getUTCDate() - 1);
   }
   return out.reverse();
@@ -290,8 +298,8 @@ async function main() {
     }
   } catch { /* 第一次跑還沒有這個資料夾 */ }
 
-  const wanted = candidateDays(Math.round(KEEP_DAYS * 1.5));   // 多列一些，扣掉假日才夠 KEEP_DAYS 天
-  const todo = wanted.filter((d) => FORCE || (!existing.has(d) && !holidays.has(d)));
+  const wanted = candidateDays(KEEP_DAYS, holidays);
+  const todo = wanted.filter((d) => FORCE || !existing.has(d));
 
   log(`目標保留 ${KEEP_DAYS} 個交易日；已有 ${existing.size} 天，已知假日 ${holidays.size} 天`);
   log(`這次要抓 ${todo.length} 天` + (todo.length ? `（${todo[0]} ~ ${todo[todo.length - 1]}）` : ''));
