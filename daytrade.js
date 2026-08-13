@@ -280,15 +280,12 @@ function scoreStock(m, universe) {
 }
 
 // ─── 資料來源 ────────────────────────────────────────────────────────────────
+//
+// 網頁「不」直接打證交所——證交所沒有對瀏覽器發 CORS 授權，直接 fetch 一定是
+// Failed to fetch。改成讀同網域下的 data/，那些檔案由 GitHub Actions 每天
+// 在伺服器端抓好 commit 進 repo（見 scripts/fetch-twse.mjs）。同源就沒有 CORS 問題。
 
-const SOURCES = {
-  twseDaily: 'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
-  twseDayTrade: 'https://openapi.twse.com.tw/v1/exchangeReport/TWTB4U',
-  twseNoShortSell: 'https://openapi.twse.com.tw/v1/exchangeReport/TWTBAU1',
-  twsePunish: 'https://openapi.twse.com.tw/v1/announcement/punish',
-  tpexDaily: 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes'
-};
-
+const DATA_BASE = 'data/';
 const FETCH_TIMEOUT_MS = 20000;
 
 // 一定要有逾時。交易所的 API 忙起來會吊著不回，沒有逾時前端就真的乾等。
@@ -363,63 +360,87 @@ function normalizeQuote(row, market) {
   };
 }
 
-async function fetchMarketData(settings) {
-  const wanted = [];
-  if (settings.includeTwse !== false) wanted.push(['TWSE', SOURCES.twseDaily]);
-  if (settings.includeTpex) wanted.push(['TPEX', SOURCES.tpexDaily]);
+/** 把 data/days/*.json 的緊湊陣列格式攤回成一般的報價物件 */
+function unpackDay(day) {
+  const out = [];
+  for (const r of (day.rows || [])) {
+    const close = r[5];
+    if (!close) continue;
+    out.push({
+      code: r[0], name: r[1], market: 'TWSE', date: day.date,
+      open: r[2] || close, high: r[3], low: r[4], close,
+      volume: r[6] || 0, turnover: r[7] || 0, change: r[8] || 0,
+      trades: 0, dayTradeVolume: r[9] == null ? null : r[9]
+    });
+  }
+  return out;
+}
 
-  const quotes = [];
+/**
+ * 載入 repo 裡的資料。
+ * 已經下載過的日期會留在 IndexedDB，所以第二次之後只需要抓當天新增的那一份。
+ * onProgress(已完成, 總數) 讓畫面可以顯示進度——第一次要抓 60 天，會跑幾秒。
+ */
+async function fetchMarketData(settings, onProgress) {
   const errors = [];
-  for (const [market, url] of wanted) {
-    try {
-      const raw = await fetchJson(url);
-      const rows = Array.isArray(raw) ? raw : (raw && raw.data) || [];
-      let ok = 0;
-      for (const r of rows) {
-        const q = normalizeQuote(r, market);
-        if (q) { quotes.push(q); ok++; }
-      }
-      if (!ok) errors.push(`${market} 回應解析不出任何個股，欄位格式可能變了`);
-    } catch (e) {
-      errors.push(`${market} 行情抓取失敗：${e.message}`);
-    }
+  const index = await fetchJson(DATA_BASE + 'index.json');
+  if (!index || !Array.isArray(index.days) || !index.days.length) {
+    throw new Error('data/index.json 裡沒有任何交易日，排程可能還沒跑過');
   }
 
-  // 以下三份是加分資料，抓不到就降級處理，不擋主流程
+  // 只下載本機還沒有的日期
+  const have = await dbDates();
+  const missing = index.days.filter((d) => !have.has(d));
+  let done = 0;
+  if (onProgress) onProgress(0, missing.length);
+
+  // 併發 6 個就夠了，同網域的小檔案不必開太多
+  const queue = missing.slice();
+  const workers = Array.from({ length: Math.min(6, queue.length) }, async () => {
+    while (queue.length) {
+      const date = queue.shift();
+      try {
+        const day = await fetchJson(`${DATA_BASE}days/${date}.json`);
+        if (day && day.rows) await saveDay(date, unpackDay(day));
+      } catch (e) {
+        errors.push(`${date} 的資料讀取失敗：${e.message}`);
+      }
+      done++;
+      if (onProgress) onProgress(done, missing.length);
+    }
+  });
+  await Promise.all(workers);
+
+  // 最新一天就是要拿來選股的那天
+  const latestDate = index.days[index.days.length - 1];
+  let quotes = [];
+  try {
+    quotes = unpackDay(await fetchJson(`${DATA_BASE}days/${latestDate}.json`));
+  } catch (e) {
+    throw new Error(`最新一天（${latestDate}）的資料讀不到：${e.message}`);
+  }
+
   const extra = { dayTrade: null, noShortSell: null, punish: null };
-  try {
-    const raw = await fetchJson(SOURCES.twseDayTrade);
-    const map = new Map();
-    for (const r of (Array.isArray(raw) ? raw : [])) {
-      const code = String(pickField(r, ['Code', '股票代號', '證券代號']) || '').trim();
-      if (!code) continue;
-      const dtVol = num(pickField(r, ['TotalVolume', '當日沖銷交易成交股數', '成交股數']));
-      map.set(code, { volume: dtVol });
-    }
-    if (map.size) extra.dayTrade = map;
-  } catch (e) { errors.push(`當沖標的清單抓取失敗：${e.message}（當沖比重改給中性分）`); }
+  const dtMap = new Map();
+  for (const q of quotes) {
+    if (q.dayTradeVolume != null) dtMap.set(q.code, { volume: q.dayTradeVolume });
+  }
+  if (dtMap.size) extra.dayTrade = dtMap;
+  else errors.push('最新一天沒有當沖成交量資料，當沖比重改給中性分');
 
   try {
-    const raw = await fetchJson(SOURCES.twseNoShortSell);
-    const set = new Set();
-    for (const r of (Array.isArray(raw) ? raw : [])) {
-      const code = String(pickField(r, ['Code', '股票代號', '證券代號']) || '').trim();
-      if (code) set.add(code);
+    const meta = await fetchJson(DATA_BASE + 'meta.json');
+    if (meta) {
+      extra.punish = new Set(meta.punish || []);
+      extra.noShortSell = new Set(meta.noShortSell || []);
     }
-    extra.noShortSell = set;
-  } catch (e) { errors.push(`暫停先賣後買清單抓取失敗：${e.message}（放空標的請自行確認）`); }
+  } catch (e) {
+    errors.push(`處置股／禁先賣後買清單讀取失敗：${e.message}（請自行避開）`);
+  }
 
-  try {
-    const raw = await fetchJson(SOURCES.twsePunish);
-    const set = new Set();
-    for (const r of (Array.isArray(raw) ? raw : [])) {
-      const code = String(pickField(r, ['Code', '證券代號', '股票代號']) || '').trim();
-      if (code) set.add(code);
-    }
-    extra.punish = set;
-  } catch (e) { errors.push(`處置股清單抓取失敗：${e.message}（處置股請自行避開）`); }
+  if (Array.isArray(index.warnings)) errors.push(...index.warnings.map((w) => '排程警告：' + w));
 
-  return { quotes, extra, errors };
+  return { quotes, extra, errors, latestDate, totalDays: index.days.length, updated: index.updated };
 }
 
 // ─── 手動貼上備援 ────────────────────────────────────────────────────────────
@@ -499,6 +520,27 @@ function dbPut(db, record) {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+}
+
+// 只拿 key（日期）就好，不必把整年的資料撈進記憶體只為了知道有哪幾天
+function dbKeys(db) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DB_STORE, 'readonly');
+    const req = tx.objectStore(DB_STORE).getAllKeys();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbDates() {
+  try {
+    const db = await openDb();
+    const keys = await dbKeys(db);
+    db.close();
+    return new Set(keys.map(String));
+  } catch (e) {
+    return new Set();   // 讀不到就當成一天都沒有，全部重抓
+  }
 }
 
 function dbAll(db) {
@@ -751,7 +793,7 @@ if (typeof module !== 'undefined' && module.exports) {
     tickSize, roundToTick, addTicks, ema, atr, pivots,
     tradeCost, planTrade, estimateLevels, levelsFromBar,
     bandScore, scoreStock, screen, parsePasted, normalizeQuote, pickField, num,
-    limitStatus, demoData, DEFAULT_SETTINGS, SOURCES,
-    fetchMarketData, saveDay, loadHistory
+    limitStatus, demoData, DEFAULT_SETTINGS, DATA_BASE, unpackDay,
+    fetchMarketData, saveDay, loadHistory, dbDates
   };
 }

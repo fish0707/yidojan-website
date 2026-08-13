@@ -139,13 +139,13 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
 
   <div class="panel">
     <div class="toolbar">
-      <button class="primary" id="btn-fetch">抓取今日收盤並篩選</button>
+      <button class="primary" id="btn-fetch">載入最新收盤並篩選</button>
       <button id="btn-demo">載入示範資料</button>
       <button id="btn-paste-toggle">手動貼上資料</button>
       <button id="btn-settings-toggle">篩選設定</button>
       <button id="btn-clear">清除本地歷史</button>
     </div>
-    <div id="status">尚未載入資料。連得到證交所就按「抓取今日收盤」；如果被 CORS 或公司網路擋住，改用「手動貼上資料」，計算流程完全一樣。</div>
+    <div id="status">尚未載入資料。按「載入最新收盤並篩選」開始（第一次會下載 60 個交易日的歷史，需要幾秒）。</div>
   </div>
 
   <div class="panel hidden" id="paste-panel">
@@ -230,10 +230,11 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
   </details>
 
   <details class="explain panel">
-    <summary>資料是怎麼來的？為什麼第一次用要等幾天？</summary>
-    <p>今日收盤價量直接向證交所開放 API 取得。但 30 日均線、ATR 與轉折點需要<b>歷史日 K</b>，逐檔去抓歷史很容易被擋，所以這個網站改成：<b>每次抓到全市場收盤表就在你的瀏覽器裡存一份</b>（IndexedDB），日積月累成自己的歷史庫。</p>
-    <p>因此第一次使用時歷史只有 1 天，均線方向的參考性很低，畫面上會標「歷史 N 天」提醒你。連續每天收盤後開一次，大約一個月後 30 日均線才真正到位。這段期間建議只拿它練習辨認訊號，不要下實單。</p>
-    <p>資料來源：證交所 <code>STOCK_DAY_ALL</code>（每日收盤）、<code>TWTB4U</code>（當沖標的與當沖量）、<code>TWTBAU1</code>（暫停先賣後買）、<code>punish</code>（處置股）、櫃買 <code>tpex_mainboard_quotes</code>。若某一份抓不到，該維度會降級處理並在狀態列標明，不會整頁壞掉。</p>
+    <summary>資料是怎麼來的？</summary>
+    <p><b>這個網頁不會直接去打證交所。</b>證交所的 API 沒有對瀏覽器發 CORS 授權，網頁直接 fetch 一定失敗。所以改成：<b>GitHub Actions 每個交易日收盤後（台北時間 15:30）在伺服器端抓好資料，commit 進這個 repo</b>，網頁只讀同網域下的 <code>data/</code>——同源，沒有 CORS 問題。</p>
+    <p>歷史資料靠證交所的 <code>MI_INDEX</code>：給它任何一個過去日期，就回傳那天<b>全市場每一檔</b>的開高低收量。所以補 60 個交易日只要 60 個請求，不必一檔一檔抓。<b>30 日均線、ATR 與轉折點從第一次使用就是完整的</b>，不用等一個月。</p>
+    <p>你的瀏覽器會把下載過的日期存進 IndexedDB，所以只有第一次要下載 60 天，之後每天只補新增的那一份。</p>
+    <p>資料來源：證交所 <code>MI_INDEX</code>（每日全市場收盤）、<code>TWTB4U</code>（當沖成交量）、<code>TWTBAU1</code>（暫停先賣後買）、<code>announcement/punish</code>（處置股）。抓取腳本在 <code>scripts/fetch-twse.mjs</code>，排程在 <code>.github/workflows/twse-daily.yml</code>；若某一份抓不到，該維度會降級處理並在狀態列標明，不會整頁壞掉。</p>
   </details>
 
   <footer>
@@ -599,25 +600,29 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
   $('btn-fetch').addEventListener('click', async () => {
     const btn = $('btn-fetch');
     btn.disabled = true;
-    setStatus('連線證交所中…（第一次抓全市場資料大約需要幾秒）');
+    setStatus('載入資料中…');
     try {
       const settings = formToSettings();
-      const { quotes, extra, errors } = await fetchMarketData(settings);
+      const { quotes, extra, errors, latestDate, totalDays, updated } = await fetchMarketData(
+        settings,
+        (done, total) => {
+          // 第一次要下載 60 天，會跑幾秒，沒有進度會讓人以為當掉了
+          if (total > 1) setStatus(`第一次使用要把歷史補齊：已下載 ${done} / ${total} 個交易日…`);
+        }
+      );
       if (!quotes.length) {
-        setStatus('沒有抓到任何行情資料。\n' + errors.join('\n') +
-          '\n\n如果錯誤是 CORS 或 Failed to fetch，代表瀏覽器或網路擋掉了對交易所的請求——' +
-          '請改用「手動貼上資料」，計算流程完全一樣。', true);
+        setStatus('資料檔裡沒有任何個股。\n' + errors.join('\n'), true);
         return;
       }
-      const today = new Date().toISOString().slice(0, 10);
-      quotes.forEach((q) => { q.date = today; });
-      try { await saveDay(today, quotes); } catch (e) { errors.push('本地歷史庫寫入失敗：' + e.message); }
-      await runScreen(quotes, extra, '證交所即時抓取');
-      if (errors.length) {
-        setStatus($('status').textContent + '\n\n部分來源有問題（已降級處理）：\n' + errors.join('\n'));
-      }
+      await runScreen(quotes, extra, `收盤日 ${latestDate}（歷史 ${totalDays} 個交易日）`);
+      const foot = [];
+      if (updated) foot.push('資料更新時間：' + new Date(updated).toLocaleString('zh-TW'));
+      if (errors.length) foot.push('部分資料有問題（已降級處理）：\n' + errors.join('\n'));
+      if (foot.length) setStatus($('status').textContent + '\n\n' + foot.join('\n\n'));
     } catch (e) {
-      setStatus('抓取失敗：' + e.message + '\n請改用「手動貼上資料」。', true);
+      setStatus('載入失敗：' + e.message +
+        '\n\n這代表 data/ 底下還沒有資料——通常是每日排程還沒跑過第一次。' +
+        '可以到 repo 的 Actions 頁手動執行一次「抓取台股收盤資料」，或先用「手動貼上資料」。', true);
     } finally {
       btn.disabled = false;
     }
