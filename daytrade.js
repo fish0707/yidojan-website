@@ -325,7 +325,7 @@ function quoteCode(candidate) {
  * baseUrl 是使用者部署後填入的 QUOTE_GAS_URL；codes 是 quoteCode() 產生的陣列。
  */
 async function fetchQuotes(baseUrl, codes, timeoutMs) {
-  if (!baseUrl) throw new Error('尚未設定即時報價網址（QUOTE_GAS_URL）');
+  if (!baseUrl) throw new Error('尚未設定即時報價網址（https://script.google.com/macros/s/AKfycbxHEz11LPzHXJxTTtQmhSEOnxy2RqUHJiSXjy-6SHsy7wt8aVlQLvHL0idQnIQukHOj/exec）');
   const url = baseUrl + (baseUrl.includes('?') ? '&' : '?') +
     'action=quote&codes=' + encodeURIComponent(codes.join(','));
   const data = await fetchJson(url, timeoutMs || 15000);
