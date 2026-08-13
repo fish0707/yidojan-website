@@ -72,6 +72,9 @@ async function fetchJson(url, label) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
       if (!text.trim()) return null;               // 假日就是空的，不算錯誤
+      // 網址錯的時候證交所回的是一整頁 HTML。這種錯重試幾次都一樣，直接放棄，
+      // 讓呼叫端去試下一個候選網址。
+      if (text.trimStart().startsWith('<')) return null;
       return JSON.parse(text);
     } catch (e) {
       lastErr = e;
@@ -179,6 +182,25 @@ function parseMiIndex(json) {
 /** 當日沖銷交易標的：回傳 Map(代號 → 當沖成交股數) */
 function parseDayTrade(json) {
   const map = new Map();
+  if (!json) return map;
+
+  // 形式一：openapi 回的是物件陣列
+  if (Array.isArray(json) && json.length && typeof json[0] === 'object' && !Array.isArray(json[0])) {
+    const keys = Object.keys(json[0]);
+    const codeKey = keys.find((k) => /Code|證券代號|股票代號/i.test(k));
+    const volKey = keys.find((k) => /沖銷.*股數|TotalVolume|Volume/i.test(k));
+    if (codeKey && volKey) {
+      for (const r of json) {
+        const code = String(r[codeKey] ?? '').trim();
+        if (!/^\d{4}$/.test(code)) continue;
+        const v = num(r[volKey]);
+        if (v != null) map.set(code, v);
+      }
+      if (map.size) return map;
+    }
+  }
+
+  // 形式二：一般的 tables / dataN 表格
   for (const t of collectTables(json)) {
     const iCode = colIndex(t.fields, '證券代號', '股票代號');
     if (iCode < 0) continue;
@@ -193,6 +215,29 @@ function parseDayTrade(json) {
     if (map.size) return map;
   }
   return map;
+}
+
+/**
+ * 當沖資料的網址不只一種，而且證交所改過路徑（rwd 那條實測回的是 HTML）。
+ * 依序試，第一個解析得出東西的就用它。最新一天還可以退回 openapi（那支不吃日期）。
+ */
+async function fetchDayTrade(date, isLatest) {
+  const d = compact(date);
+  const candidates = [
+    `https://www.twse.com.tw/exchangeReport/TWTB4U?response=json&date=${d}&selectType=All`,
+    `https://www.twse.com.tw/rwd/zh/afterTrading/TWTB4U?date=${d}&selectType=All&response=json`,
+    `https://www.twse.com.tw/rwd/zh/dayTrading/TWTB4U?date=${d}&selectType=All&response=json`
+  ];
+  if (isLatest) candidates.push('https://openapi.twse.com.tw/v1/exchangeReport/TWTB4U');
+
+  for (const url of candidates) {
+    try {
+      const map = parseDayTrade(await fetchJson(url, date + ' 當沖'));
+      if (map.size) return { map, url };
+    } catch (e) { /* 換下一個候選網址 */ }
+    await sleep(THROTTLE_MS);
+  }
+  return { map: new Map(), url: null };
 }
 
 // ─── 日期 ────────────────────────────────────────────────────────────────────
@@ -307,23 +352,22 @@ async function main() {
     const file = path.join(DAYS_DIR, `${date}.json`);
     const day = JSON.parse(await readFile(file, 'utf8'));
     if (!FORCE && day.rows.some((r) => r[9] != null)) continue;   // 已經補過就不重抓
-    const url = `https://www.twse.com.tw/rwd/zh/afterTrading/TWTB4U?date=${compact(date)}&selectType=All&response=json`;
+    const isLatest = date === days[days.length - 1];
     try {
-      const dt = parseDayTrade(await fetchJson(url, date + ' 當沖'));
+      const { map: dt, url } = await fetchDayTrade(date, isLatest);
       if (dt.size) {
         for (const r of day.rows) {
           const v = dt.get(r[0]);
           if (v != null) r[9] = v;
         }
         await writeFile(file, JSON.stringify(day));
-        log(`   ${date} 當沖資料 ✓ ${dt.size} 檔`);
+        log(`   ${date} 當沖資料 ✓ ${dt.size} 檔（${url}）`);
       } else {
-        warn(`${date} 當沖清單解析不到資料（當沖比重會顯示為未知）`);
+        warn(`${date} 當沖清單試過所有來源都拿不到（當沖比重會顯示為未知，不影響其他篩選）`);
       }
     } catch (e) {
       warn(`${date} 當沖清單抓取失敗：${e.message}`);
     }
-    await sleep(THROTTLE_MS);
   }
 
   // 處置股與暫停先賣後買只跟「最新狀態」有關，抓一份就好
