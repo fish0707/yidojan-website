@@ -227,6 +227,114 @@ function levelsFromBar(side, barHigh, barLow) {
   return { entry: addTicks(barLow, -1), stop: addTicks(barHigh, 1) };
 }
 
+// ─── 盤中即時監控 ────────────────────────────────────────────────────────────
+//
+// 收盤後的篩選只能給「預估」價位——支撐壓力是用昨天以前的資料算的，實際進場點
+// 要等盤中那根 15 分鐘 K 棒真的走出來才知道。這一段就是做這件事：把即時報價的
+// 快照堆成 15 分鐘蠟燭，蠟燭收盤時判斷「掃蕩後收回」是否成立，成立就用
+// levelsFromBar() 算出精確的進場/停損，不重造價位計算邏輯。
+//
+// 證交所的即時報價 API 只給「當下快照」（最新成交價、當日累計高低），不是逐筆
+// K 線，所以蠟燭是靠反覆輪詢自己堆出來的近似值——兩次輪詢之間如果有一個瞬間
+// 插針又收回，可能沒被捕捉到。這點必須讓使用者知道，不能包裝成跟看盤軟體
+// 一樣精確。
+
+var MARKET_OPEN_MINUTES = 9 * 60;          // 09:00
+var MARKET_CLOSE_MINUTES = 13 * 60 + 30;   // 13:30
+var CANDLE_MINUTES = 15;
+var OPENING_NOISE_MINUTES = 15;            // 09:00-09:15 這根蠟燭的訊號不算數
+
+// 台灣沒有日光節約時間，UTC+8 是常數，不用查時區資料庫
+function taipeiMinutesOfDay(ms) {
+  const d = new Date(ms);
+  const utcMinutes = d.getUTCHours() * 60 + d.getUTCMinutes() + d.getUTCSeconds() / 60;
+  return (utcMinutes + 8 * 60) % (24 * 60);
+}
+
+function isMarketHours(ms) {
+  const m = taipeiMinutesOfDay(ms);
+  return m >= MARKET_OPEN_MINUTES && m < MARKET_CLOSE_MINUTES;
+}
+
+// 09:00 之後第幾根 15 分鐘蠟燭（0 起算）；非交易時間回傳 null，呼叫端要自己先檔 isMarketHours
+function candleIndex(ms) {
+  if (!isMarketHours(ms)) return null;
+  return Math.floor((taipeiMinutesOfDay(ms) - MARKET_OPEN_MINUTES) / CANDLE_MINUTES);
+}
+
+function isOpeningCandle(idx) {
+  return idx === 0;   // 對應 09:00-09:15，PDF 策略與檢查表都要求跳過這段亂流
+}
+
+/**
+ * 用一筆新的報價快照更新目前這根蠟燭。
+ *
+ * prevCandle: 上一輪的蠟燭狀態（{idx, open, high, low, close}）或 null（還沒開始）
+ * tick: { price }，price 可能是 null（今天還沒成交過，或非交易時間）
+ * nowMs: 這筆快照的時間戳
+ * lastKnownPrice: tick.price 是 null 時的備援（沿用上一筆已知價格），避免把「還沒成交」誤判成價格是 0
+ *
+ * 回傳 { candle, closedCandle }：closedCandle 只在「這一輪跨到下一根蠟燭」時才有值，
+ * 代表剛剛結束的那根蠟燭——訊號判定要用這個，不要用還在形成中的 candle。
+ */
+function updateCandle(prevCandle, tick, nowMs, lastKnownPrice) {
+  if (!isMarketHours(nowMs)) return { candle: prevCandle, closedCandle: null };
+
+  const idx = candleIndex(nowMs);
+  const price = tick && tick.price != null ? tick.price : lastKnownPrice;
+  if (price == null) return { candle: prevCandle, closedCandle: null };   // 從沒拿到過價格，還不能開蠟燭
+
+  if (!prevCandle || prevCandle.idx !== idx) {
+    const closedCandle = prevCandle && prevCandle.idx !== idx ? prevCandle : null;
+    return { candle: { idx, open: price, high: price, low: price, close: price }, closedCandle };
+  }
+  return {
+    candle: {
+      idx,
+      open: prevCandle.open,
+      high: Math.max(prevCandle.high, price),
+      low: Math.min(prevCandle.low, price),
+      close: price
+    },
+    closedCandle: null
+  };
+}
+
+/**
+ * 掃蕩收回判定，跟 EOD 卡片裡的邏輯是同一套規則，只是這裡吃的是即時蠟燭。
+ * swept：這根蠟燭曾經跌破支撐／衝過壓力（掃蕩發生過）
+ * reclaimed：目前（或收盤時）的價格已經收回關鍵價位的正確一側
+ * confirmed：兩者同時成立——對形成中的蠟燭來說只是「暫時符合」，
+ *   真正算數要等蠟燭收盤（呼叫端用 closedCandle 再判一次）
+ */
+function evaluateSweep(candle, side, levelPrice) {
+  if (!candle) return { swept: false, reclaimed: false, confirmed: false };
+  const swept = side === 'long' ? candle.low < levelPrice : candle.high > levelPrice;
+  const reclaimed = side === 'long' ? candle.close > levelPrice : candle.close < levelPrice;
+  return { swept, reclaimed, confirmed: swept && reclaimed };
+}
+
+/** 把候選的市場別轉成證交所即時報價 API 要的前綴（tse_/otc_） */
+function quoteCode(candidate) {
+  const prefix = candidate.market === 'TPEX' ? 'otc_' : 'tse_';
+  return prefix + candidate.code;
+}
+
+/**
+ * 呼叫盤中報價代理（見 gas/daytrade_quote/），一次查完所有代號。
+ * baseUrl 是使用者部署後填入的 QUOTE_GAS_URL；codes 是 quoteCode() 產生的陣列。
+ */
+async function fetchQuotes(baseUrl, codes, timeoutMs) {
+  if (!baseUrl) throw new Error('尚未設定即時報價網址（QUOTE_GAS_URL）');
+  const url = baseUrl + (baseUrl.includes('?') ? '&' : '?') +
+    'action=quote&codes=' + encodeURIComponent(codes.join(','));
+  const data = await fetchJson(url, timeoutMs || 15000);
+  if (!data || data.status !== 'success') {
+    throw new Error((data && data.error) || '即時報價代理回應異常');
+  }
+  return data.quotes || [];
+}
+
 // ─── 評分 ────────────────────────────────────────────────────────────────────
 
 function bandScore(value, lo, hi) {
@@ -794,6 +902,9 @@ if (typeof module !== 'undefined' && module.exports) {
     tradeCost, planTrade, estimateLevels, levelsFromBar,
     bandScore, scoreStock, screen, parsePasted, normalizeQuote, pickField, num,
     limitStatus, demoData, DEFAULT_SETTINGS, DATA_BASE, unpackDay,
-    fetchMarketData, saveDay, loadHistory, dbDates
+    fetchMarketData, saveDay, loadHistory, dbDates,
+    taipeiMinutesOfDay, isMarketHours, candleIndex, isOpeningCandle,
+    updateCandle, evaluateSweep, quoteCode, fetchQuotes,
+    MARKET_OPEN_MINUTES, MARKET_CLOSE_MINUTES, CANDLE_MINUTES
   };
 }
