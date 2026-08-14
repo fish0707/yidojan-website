@@ -41,24 +41,52 @@ function isAuthError_(message) {
 var AUTH_HINT = '指令碼還沒取得對外連線的權限。'
   + '請到 Apps Script 編輯器執行一次 authorizeAndSelfTest 完成授權，再重新部署。';
 
+// 證交所的即時報價頁面自己就是帶著這些標頭在打的。原本只送一個自訂的 User-Agent，
+// 對這種有防爬的端點來說等於自報身分說「我是機器人」。
+var BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+  + '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+var MIS_REFERER = 'https://mis.twse.com.tw/stock/fibest.jsp';
+
+function quoteHeaders_() {
+  return {
+    'User-Agent': BROWSER_UA,
+    'Referer': MIS_REFERER,
+    'Accept': 'application/json, text/javascript, */*; q=0.01',
+    'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8'
+  };
+}
+
 /**
- * 呼叫證交所即時報價，遇到伺服器端的暫時性故障就重試一次。
- * 只重試 5xx——429（被限流）重試只會更快被鎖，不重試，直接把錯誤丟回去讓
- * 前端這一輪跳過、等下一次輪詢。
+ * 呼叫證交所即時報價。
+ *
+ * 注意 muteHttpExceptions: true 的意思——HTTP 錯誤碼（403、429）不會拋例外，
+ * 會正常回傳讓我們讀狀態碼。所以只要進到 catch，就代表是「連線層」失敗
+ * （對方拒絕連線／重設連線／DNS／TLS），根本沒拿到任何 HTTP 回應。
+ * 這兩種的處理與訊息都要分開，不然使用者只看到一句「失敗」無從判斷。
+ *
+ * 已實測的事實（從 GitHub Actions 的資料中心 IP 打同一支 API）：
+ * 不帶任何標頭、十二檔、跟這裡一樣的 %7C 編碼，全部回 HTTP 200 拿到真實報價，
+ * 連續請求也沒被限流。所以證交所擋的不是「資料中心 IP」或「請求寫法」，
+ * 而是 Google Apps Script 那段共用 IP。標頭留著沒有壞處，但別期待它能解決問題。
+ *
+ * 連線層的例外原本一遇到就直接放棄，但實測是間歇性失敗（使用者那邊曾成功過一次），
+ * 所以連線失敗也要重試，不是只重試 5xx。
  */
 function fetchQuotesWithRetry_(url) {
   var last = null;
   for (var i = 0; i < QUOTE_MAX_ATTEMPTS; i++) {
-    if (i > 0) Utilities.sleep(800);
+    if (i > 0) Utilities.sleep(800 * i);
     var res;
     try {
       res = UrlFetchApp.fetch(url, {
         muteHttpExceptions: true,
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; yidojan-daytrade-quote/1.0)' }
+        followRedirects: true,
+        headers: quoteHeaders_()
       });
     } catch (ex) {
       if (isAuthError_(ex.message)) return { authError: true };
-      return { exception: ex.message };
+      last = { exception: ex.message };
+      continue;                         // 間歇性的連線失敗，值得再試一次
     }
     last = { code: res.getResponseCode(), text: res.getContentText() };
     if (last.code < 500) return last;
@@ -140,12 +168,114 @@ function doGet(e) {
   try {
     switch (action) {
       case 'quote': return json(getQuotes_(e.parameter));
+      case 'diag':  return json(runDiagnostics_());
       case 'ping':  return json({ status: 'success', serverNow: Date.now() });
       default:      return json(err('UNKNOWN_ACTION', '不支援的 action：' + action));
     }
   } catch (ex) {
     return json(err('SERVER_ERROR', String(ex && ex.message ? ex.message : ex)));
   }
+}
+
+// ─── 診斷 ─────────────────────────────────────────────────────────────────────
+
+/**
+ * 逐一嘗試各種寫法，回報哪一種真的通。
+ *
+ * 這支存在的理由：實測顯示 GAS 打 mis.twse.com.tw 是「間歇性」在連線層失敗，
+ * 但那只是推論，不能靠猜。與其一次改一個地方然後叫使用者盤中再試一次，
+ * 不如一次把所有變體都跑過，直接看哪個成立。
+ */
+function runDiagnostics_() {
+  var API = QUOTE_API;
+  var tests = [];
+
+  function record(name, fn) {
+    var t0 = Date.now();
+    try {
+      var res = fn();
+      var text = res.getContentText();
+      var code = res.getResponseCode();
+      var ok = code === 200 && text.indexOf('msgArray') !== -1;
+      tests.push({
+        name: name, ok: ok, httpCode: code, bytes: text.length,
+        ms: Date.now() - t0,
+        note: ok ? '成功，有拿到報價資料'
+                 : (code === 200 ? '連得到但回應裡沒有 msgArray（可能被導去別的頁面）'
+                                 : 'HTTP ' + code)
+      });
+    } catch (ex) {
+      tests.push({
+        name: name, ok: false, httpCode: null, bytes: 0, ms: Date.now() - t0,
+        note: '連線層失敗（沒拿到任何 HTTP 回應）：' + String(ex && ex.message ? ex.message : ex)
+      });
+    }
+  }
+
+  record('1. 陽春：無標頭、單一檔', function () {
+    return UrlFetchApp.fetch(API + '?ex_ch=tse_2330.tw&json=1&delay=0', { muteHttpExceptions: true });
+  });
+
+  record('2. 帶瀏覽器標頭', function () {
+    return UrlFetchApp.fetch(API + '?ex_ch=tse_2330.tw&json=1&delay=0',
+      { muteHttpExceptions: true, headers: quoteHeaders_() });
+  });
+
+  record('3. 多檔・管線符號編碼成 %7C（= 正式查詢的寫法）', function () {
+    return UrlFetchApp.fetch(
+      API + '?ex_ch=' + encodeURIComponent('tse_2330.tw|tse_2317.tw|tse_2884.tw') + '&json=1&delay=0',
+      { muteHttpExceptions: true, headers: quoteHeaders_() });
+  });
+
+  record('4. 多檔・管線符號不編碼', function () {
+    return UrlFetchApp.fetch(API + '?ex_ch=tse_2330.tw|tse_2317.tw|tse_2884.tw&json=1&delay=0',
+      { muteHttpExceptions: true, headers: quoteHeaders_() });
+  });
+
+  // 對照組。這支從 GAS 打得通（處置股清單就是這樣抓的），用來區分
+  // 「整台機器連不到證交所」與「只有 mis 這台被擋」。
+  record('5. 對照組：openapi.twse.com.tw', function () {
+    return UrlFetchApp.fetch('https://openapi.twse.com.tw/v1/exchangeReport/TWTBAU1',
+      { muteHttpExceptions: true });
+  });
+
+  var quoteTests = tests.filter(function (t) { return t.name.indexOf('對照組') === -1; });
+  var quoteOk = quoteTests.filter(function (t) { return t.ok; }).length;
+  var controlOk = tests.filter(function (t) {
+    return t.name.indexOf('對照組') !== -1 && t.ok;
+  }).length > 0;
+
+  var summary;
+  if (quoteOk > 0) {
+    summary = '即時報價可以從這個 GAS 取得（' + quoteOk + '/' + quoteTests.length + ' 種寫法成功）';
+  } else if (controlOk) {
+    // 這正是實際遇到的情況：證交所別台連得到，只有即時報價這台連不到，
+    // 而同樣的請求從 GitHub 的資料中心 IP 打卻完全正常。
+    summary = '證交所其他主機連得到，但即時報價這台完全連不到'
+      + '——是 Google Apps Script 的 IP 被擋，改寫請求沒有用，要換一個代理（Cloudflare Worker）。';
+  } else {
+    summary = '這個 GAS 連證交所任何一台都連不到，先確認對外連線授權有沒有完成。';
+  }
+
+  return {
+    status: 'success',
+    serverNow: Date.now(),
+    summary: summary,
+    okCount: tests.filter(function (t) { return t.ok; }).length,
+    tests: tests
+  };
+}
+
+/** 在 Apps Script 編輯器直接執行這支，看下方執行紀錄 */
+function diagnoseQuoteSources() {
+  var r = runDiagnostics_();
+  var lines = ['=== 即時報價來源診斷 ===', r.summary, ''];
+  r.tests.forEach(function (t) {
+    lines.push((t.ok ? '✅ ' : '❌ ') + t.name + '　' + t.note + '（' + t.ms + 'ms）');
+  });
+  var out = lines.join('\n');
+  Logger.log(out);
+  return out;
 }
 
 // ─── 共用工具 ─────────────────────────────────────────────────────────────────

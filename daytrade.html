@@ -229,7 +229,9 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
       <button id="btn-live-toggle">開始監控</button>
       <button id="btn-live-sound">啟用提示音</button>
       <button id="btn-live-demo">示範盤中訊號</button>
+      <button id="btn-live-diag">連線診斷</button>
     </div>
+    <div id="live-diag" class="note hidden"></div>
     <div id="live-scoreboard" class="note"></div>
     <div id="live-status" class="note"></div>
     <div class="tablescroll">
@@ -659,6 +661,7 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
   const QUOTE_GAS_URL_KEY = 'daytrade.quoteGasUrl';
   const POLL_ACTIVE_MS = 10000;
   const POLL_HIDDEN_MS = 60000;
+  const POLL_MAX_MS = 60000;    // 連續失敗時退避的上限
 
   let live = null;   // 目前這批候選的監控狀態，換一批資料就整個重建
 
@@ -709,9 +712,10 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
     const url = getQuoteGasUrl();
     const hint = $('live-hint');
     if (!url) {
-      hint.innerHTML = '尚未設定即時報價網址。需要先部署一次 <code>gas/daytrade_quote/</code>' +
-        '（獨立的 Google Apps Script 專案，步驟在該資料夾的 README），' +
-        '再把部署後拿到的網址貼在這裡：' +
+      hint.innerHTML = '尚未設定即時報價網址。請先部署 <b>Cloudflare Worker</b>' +
+        '（<code>cloudflare/README.md</code>，約兩分鐘）——' +
+        '<b>實測確認證交所擋掉了 Google Apps Script 的 IP</b>，GAS 那條路會一直連線失敗。' +
+        '部署完把網址貼在這裡：' +
         '<input type="text" id="live-gas-url" placeholder="https://script.google.com/macros/s/xxx/exec" ' +
         'style="width:100%;margin-top:.4rem;padding:.4rem .5rem;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--text)">';
       const input = document.getElementById('live-gas-url');
@@ -752,7 +756,13 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
     }
     if (it.status === 'watching') return { text: '觀察中', cls: '' };
     const idx = it.candle ? it.candle.idx : null;
-    if (idx == null) return { text: '等待開盤', cls: '' };
+    if (idx == null) {
+      // 沒有蠟燭有兩種原因，講清楚是哪一種：真的還沒開盤，還是開盤了但報價抓不到。
+      // 原本一律顯示「等待開盤」，盤中連線失敗時整排都寫等待開盤，會誤導。
+      return (nowMs != null && isMarketHours(nowMs))
+        ? { text: '尚未取得報價', cls: 'warn' }
+        : { text: '等待開盤', cls: '' };
+    }
     if (idx === 0) return { text: '開盤觀察（前 15 分鐘不算數）', cls: '' };
     return { text: '監控中', cls: '' };
   }
@@ -1017,24 +1027,43 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
     try {
       const quotes = await fetchQuotes(url, codes);
       live.pollErrors = 0;
+      live.lastOkMs = nowMs;
       applyTicks(quotes, nowMs);
       $('live-status').textContent = '最後更新：' + new Date(nowMs).toLocaleTimeString('zh-TW');
     } catch (e) {
       live.pollErrors++;
-      $('live-status').textContent = '⚠ 查詢失敗（' + e.message + '），' +
-        (live.pollErrors > 3 ? '已連續失敗 ' + live.pollErrors + ' 次，請確認 GAS 是否部署成功。' : '下一輪自動重試。');
+      // 原始錯誤裡包著上百字元的網址，整段吐到畫面上使用者看不懂也幫不上忙。
+      // 只留真正有資訊量的那句，完整內容留給「連線診斷」。
+      const reason = String(e.message || '')
+        .replace(/https?:\/\/\S+/g, '（網址略）')
+        .slice(0, 80);
+      const since = live.lastOkMs
+        ? '上次成功更新：' + new Date(live.lastOkMs).toLocaleTimeString('zh-TW')
+        : '從開始監控到現在都沒成功過';
+      $('live-status').textContent =
+        '⚠ 查詢失敗（' + reason + '）· 連續 ' + live.pollErrors + ' 次 · ' + since +
+        (live.pollErrors >= 3 ? ' · 按「連線診斷」查出是哪一段不通' : '');
     }
+  }
+
+  /**
+   * 連線失敗時要退避，不能照原本的節奏硬打。
+   * 對方若正在擋你，每 10 秒固定重試只會讓情況更糟；成功後立刻回到正常頻率。
+   */
+  function pollDelay() {
+    if (document.hidden) return POLL_HIDDEN_MS;
+    if (!live.pollErrors) return POLL_ACTIVE_MS;
+    return Math.min(POLL_ACTIVE_MS * Math.pow(2, live.pollErrors), POLL_MAX_MS);
   }
 
   function scheduleNextPoll() {
     if (!live || !live.running) return;
     const token = live.token;
-    const delay = document.hidden ? POLL_HIDDEN_MS : POLL_ACTIVE_MS;
     live.timer = setTimeout(async () => {
       if (!live || live.token !== token || !live.running) return;
       await pollOnce();
       scheduleNextPoll();
-    }, delay);
+    }, pollDelay());
   }
 
   function startLiveMonitor() {
@@ -1202,6 +1231,79 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
   });
 
   $('btn-live-demo').addEventListener('click', startLiveDemo);
+
+  // ── 連線診斷 ─────────────────────────────────────────────────────────────
+  //
+  // 「查詢失敗」四個字幫不上任何忙——到底是網址填錯、代理沒部署好、還是代理
+  // 連不到證交所？這顆按鈕把整條鏈路逐段測過，直接指出斷在哪一段。
+  //
+  // 已經實測確認的兩件事（用 GitHub Actions 從資料中心 IP 打同一支 API）：
+  //   1. 證交所這支 API 沒有發 CORS 標頭 → 瀏覽器一定連不到，代理是必要的
+  //   2. 資料中心 IP 打得通、不限流 → 連不上是「這個代理的出口 IP 被擋」
+
+  async function runDiagnostics() {
+    const box = $('live-diag');
+    box.classList.remove('hidden');
+    const lines = ['<b>連線診斷</b>'];
+    const paint = () => { box.innerHTML = lines.join('<br>'); };
+    lines.push('診斷中…');
+    paint();
+    lines.pop();
+
+    // 1) 瀏覽器直連（已知會失敗，但實際跑一次才能確定不是別的原因）
+    try {
+      await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_2330.tw&json=1&delay=0',
+        { mode: 'cors' });
+      lines.push('✅ <b>瀏覽器直連證交所</b>：竟然成功了——那可以完全不用代理，跟我說一聲。');
+    } catch (e) {
+      lines.push('❌ <b>瀏覽器直連證交所</b>：被 CORS 擋下（預期中，證交所沒發 CORS 標頭）。'
+        + '<span class="note">所以一定要有代理，這一項失敗是正常的。</span>');
+    }
+
+    // 2) 代理
+    const url = getQuoteGasUrl();
+    if (!url) {
+      lines.push('❌ <b>代理</b>：還沒填網址。');
+      paint();
+      return;
+    }
+    try {
+      const data = await fetchJson(url + (url.includes('?') ? '&' : '?') + 'action=diag', 20000);
+      if (data && data.status === 'success') {
+        const where = data.source === 'cloudflare-worker' ? 'Cloudflare Worker' : 'Google Apps Script';
+        const good = data.okCount > 0;
+        lines.push((good ? '✅' : '❌') + ' <b>' + where + ' → 證交所</b>：' + data.summary);
+        (data.tests || []).forEach((t) => {
+          lines.push('　　' + (t.ok ? '✅' : '❌') + ' ' + t.name + '：' + t.note);
+        });
+        if (!good && where === 'Google Apps Script') {
+          lines.push('<span class="hint">結論：Google 的 IP 被證交所擋掉了，改請求寫法沒有用。'
+            + '請改部署 Cloudflare Worker（見 <code>cloudflare/README.md</code>），把網址換掉就好。</span>');
+        }
+      } else {
+        lines.push('❌ <b>代理</b>：回應異常 —— ' + ((data && data.error) || '格式不對'));
+      }
+    } catch (e) {
+      lines.push('❌ <b>代理</b>：叫不動（' + String(e.message).slice(0, 60) + '）。'
+        + '<span class="note">網址可能填錯，或部署時「具有存取權的使用者」沒設成「任何人」。</span>');
+    }
+
+    // 3) 實際查一次報價，確認端到端
+    try {
+      const qs = await fetchQuotes(url, ['tse_2330']);
+      const p = qs && qs[0] ? qs[0].price : null;
+      lines.push('✅ <b>端到端查一檔（台積電）</b>：' +
+        (p == null ? '有回應但目前無成交價（非交易時段是正常的）' : '成交價 ' + p));
+    } catch (e) {
+      lines.push('❌ <b>端到端查一檔</b>：' + String(e.message).slice(0, 60));
+    }
+    paint();
+  }
+
+  $('btn-live-diag').addEventListener('click', () => {
+    $('btn-live-diag').disabled = true;
+    runDiagnostics().finally(() => { $('btn-live-diag').disabled = false; });
+  });
 
   // ── 事件 ──────────────────────────────────────────────────────────────────
 
