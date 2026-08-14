@@ -32,9 +32,11 @@ function roundToTick(price, dir) {
   const tick = tickSize(price);
   const n = price / tick;
   let k;
+  // 三個方向都要加 epsilon。少了它，50.15/0.1 會算出 501.49999999999994，
+  // 明明是剛好半檔卻被無聲地往下捨——四捨五入的結果會隨浮點誤差飄。
   if (dir === 'up') k = Math.ceil(n - 1e-9);
   else if (dir === 'down') k = Math.floor(n + 1e-9);
-  else k = Math.round(n);
+  else k = Math.round(n + 1e-9);
   return Number((k * tick).toFixed(4));
 }
 
@@ -124,7 +126,14 @@ function pivots(bars, left, right) {
 const FEE_RATE = 0.001425;   // 券商手續費
 const TAX_RATE = 0.0015;     // 現股當沖證交稅（一般賣出是 0.003，當沖減半）
 
-function tradeCost(entry, exit, lots, opts) {
+/**
+ * 一趟來回的手續費與證交稅。
+ *
+ * side 影響的是「證交稅課在哪一腳」：稅只課賣出，做多是賣在 exit、做空是先賣在 entry。
+ * 不分方向一律用 exit 當稅基的話，做空的稅會算錯（金額不大，但這是算錢的地方）。
+ * 沒帶 side 時維持舊行為（等同做多），避免呼叫端漏帶就靜默算錯。
+ */
+function tradeCost(entry, exit, lots, opts, side) {
   const shares = lots * 1000;
   const discount = opts && opts.feeDiscount != null ? opts.feeDiscount : 0.6;
   const minFee = opts && opts.minFee != null ? opts.minFee : 20;
@@ -132,7 +141,8 @@ function tradeCost(entry, exit, lots, opts) {
   const rawSell = exit * shares * FEE_RATE * discount;
   const buyFee = Math.max(Math.round(rawBuy), shares > 0 ? minFee : 0);
   const sellFee = Math.max(Math.round(rawSell), shares > 0 ? minFee : 0);
-  const tax = Math.round(exit * shares * TAX_RATE);
+  const sellLegPrice = side === 'short' ? entry : exit;
+  const tax = Math.round(sellLegPrice * shares * TAX_RATE);
   return { buyFee, sellFee, tax, total: buyFee + sellFee + tax };
 }
 
@@ -158,7 +168,7 @@ function planTrade(side, entry, stop, settings) {
   // 只用停損距離反推張數，實際停損出場時會超出預算一成以上。
   let lots = 0;
   for (let n = capped; n >= 1; n--) {
-    const loss = stopDistance * n * 1000 + tradeCost(entry, stop, n, s).total;
+    const loss = stopDistance * n * 1000 + tradeCost(entry, stop, n, s, side).total;
     if (loss <= riskBudget) { lots = n; break; }
   }
   const lotsCapped = rawLots > maxLots && lots === maxLots;
@@ -167,11 +177,11 @@ function planTrade(side, entry, stop, settings) {
 
   const lossExit = stop;
   const winExit = target;
-  const costAtLoss = tradeCost(entry, lossExit, lots, s);
-  const costAtWin = tradeCost(entry, winExit, lots, s);
+  const costAtLoss = tradeCost(entry, lossExit, lots, s, side);
+  const costAtWin = tradeCost(entry, winExit, lots, s, side);
 
   // 損益兩平：價格要走多遠才剛好打平成本（用 1 張估算，跟張數無關的每股成本）
-  const probe = tradeCost(entry, entry, Math.max(lots, 1), { ...s, minFee: 0 });
+  const probe = tradeCost(entry, entry, Math.max(lots, 1), { ...s, minFee: 0 }, side);
   const beMove = roundToTick(probe.total / (Math.max(lots, 1) * 1000), 'up');
 
   const grossWin = stopDistance * shares;
@@ -243,6 +253,8 @@ var MARKET_OPEN_MINUTES = 9 * 60;          // 09:00
 var MARKET_CLOSE_MINUTES = 13 * 60 + 30;   // 13:30
 var CANDLE_MINUTES = 15;
 var OPENING_NOISE_MINUTES = 15;            // 09:00-09:15 這根蠟燭的訊號不算數
+var NO_NEW_ENTRY_MINUTES = 13 * 60;        // 13:00 之後不開新倉
+var FORCE_CLOSE_MINUTES = 13 * 60 + 20;    // 13:20 一定要平倉，沒沖掉就要交割全額股款
 
 // 台灣沒有日光節約時間，UTC+8 是常數，不用查時區資料庫
 function taipeiMinutesOfDay(ms) {
@@ -312,6 +324,63 @@ function evaluateSweep(candle, side, levelPrice) {
   const swept = side === 'long' ? candle.low < levelPrice : candle.high > levelPrice;
   const reclaimed = side === 'long' ? candle.close > levelPrice : candle.close < levelPrice;
   return { swept, reclaimed, confirmed: swept && reclaimed };
+}
+
+/**
+ * 進場之後：這一輪該不該出場了？
+ *
+ * position: { side, entry, stop, target, dayHighAtEntry, dayLowAtEntry }
+ * tick: { price, high, low }  ← high/low 是證交所回的「當日累計」極值，不是我們自己堆的
+ * 回傳 null（繼續持有）或 { reason:'stop'|'target'|'time', price }
+ *
+ * 兩個刻意的設計：
+ *
+ * 1. 停損優先於停利。十秒輪詢一次，同一個區間內如果兩邊看起來都碰到了，我們無從得知
+ *    哪個先發生。這種時候必須假設是壞的那個——工具寧可把績效講得比實際保守，
+ *    也不能反過來讓使用者以為自己賺到了。
+ *
+ * 2. 除了比對最新成交價，也用當日累計高低來回推。那是交易所給的真實極值，
+ *    能抓到兩次輪詢之間的瞬間觸價；只看最新成交價的話，插針碰到停損又彈回來
+ *    會被整個漏掉。做法是拿「進場當下的日高日低」當基準線：若進場時日高還沒到目標價、
+ *    現在的日高卻超過了，代表目標價是在進場之後才被觸及的。
+ */
+function evaluateExit(position, tick, nowMs) {
+  if (!position) return null;
+  const { side, entry, stop, target, dayHighAtEntry, dayLowAtEntry } = position;
+  const price = tick && tick.price != null ? tick.price : null;
+  const dayHigh = tick && tick.high != null ? tick.high : null;
+  const dayLow = tick && tick.low != null ? tick.low : null;
+
+  // 進場之後日高/日低是否越過了某個價位（用進場當下的極值當基準，排除進場前就碰過的情況）
+  const brokeUpAfterEntry = (level) =>
+    dayHigh != null && dayHigh >= level && (dayHighAtEntry == null || dayHighAtEntry < level);
+  const brokeDownAfterEntry = (level) =>
+    dayLow != null && dayLow <= level && (dayLowAtEntry == null || dayLowAtEntry > level);
+
+  const stopHit = side === 'long'
+    ? (price != null && price <= stop) || brokeDownAfterEntry(stop)
+    : (price != null && price >= stop) || brokeUpAfterEntry(stop);
+  if (stopHit) return { reason: 'stop', price: stop };
+
+  const targetHit = side === 'long'
+    ? (price != null && price >= target) || brokeUpAfterEntry(target)
+    : (price != null && price <= target) || brokeDownAfterEntry(target);
+  if (targetHit) return { reason: 'target', price: target };
+
+  // 時間到就是要平，不管賺賠——沒沖掉要交割全額股款，那才是真正的災難
+  if (nowMs != null && taipeiMinutesOfDay(nowMs) >= FORCE_CLOSE_MINUTES) {
+    return { reason: 'time', price: price != null ? price : entry };
+  }
+  return null;
+}
+
+/** 實際出場後的損益（重用 tradeCost，不重算費用與稅） */
+function realizePnl(side, entry, exitPrice, lots, settings) {
+  const shares = lots * 1000;
+  const dir = side === 'long' ? 1 : -1;
+  const gross = (exitPrice - entry) * shares * dir;
+  const cost = tradeCost(entry, exitPrice, lots, settings || {}, side).total;
+  return { gross: Math.round(gross), cost, net: Math.round(gross - cost) };
 }
 
 /** 把候選的市場別轉成證交所即時報價 API 要的前綴（tse_/otc_） */
@@ -904,7 +973,8 @@ if (typeof module !== 'undefined' && module.exports) {
     limitStatus, demoData, DEFAULT_SETTINGS, DATA_BASE, unpackDay,
     fetchMarketData, saveDay, loadHistory, dbDates,
     taipeiMinutesOfDay, isMarketHours, candleIndex, isOpeningCandle,
-    updateCandle, evaluateSweep, quoteCode, fetchQuotes,
-    MARKET_OPEN_MINUTES, MARKET_CLOSE_MINUTES, CANDLE_MINUTES
+    updateCandle, evaluateSweep, evaluateExit, realizePnl, quoteCode, fetchQuotes,
+    MARKET_OPEN_MINUTES, MARKET_CLOSE_MINUTES, CANDLE_MINUTES,
+    NO_NEW_ENTRY_MINUTES, FORCE_CLOSE_MINUTES
   };
 }
