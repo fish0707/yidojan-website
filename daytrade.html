@@ -524,15 +524,26 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
     colInput.innerHTML = '<h3>② 盤中確認 K 棒出現後，填進來重算</h3>';
     const inputs = document.createElement('div');
     inputs.className = 'grid';
-    inputs.innerHTML =
-      '<label class="field">確認 K 棒最高價<input type="number" step="0.01" id="in-high-' + c.code + '"></label>' +
-      '<label class="field">' + (isLong ? '掃蕩最低價' : '掃蕩最高價') + '<input type="number" step="0.01" id="in-low-' + c.code + '"></label>';
+    // 兩個欄位固定對應「那根 K 棒的最高價」與「最低價」，但哪一個是進場、哪一個是停損
+    // 會隨方向對調。標籤一定要把角色寫出來——之前做空時兩欄都寫「最高價」，
+    // 照字面填會把掃蕩高點填進實際需要最低價的欄位，停損距離變成兩檔、張數整個爆掉。
+    inputs.innerHTML = isLong
+      ? '<label class="field">確認 K 棒最高價（→ 進場）<input type="number" step="0.01" id="in-high-' + c.code + '"></label>' +
+        '<label class="field">掃蕩最低價（→ 停損）<input type="number" step="0.01" id="in-low-' + c.code + '"></label>'
+      : '<label class="field">掃蕩最高價（→ 停損）<input type="number" step="0.01" id="in-high-' + c.code + '"></label>' +
+        '<label class="field">確認 K 棒最低價（→ 進場）<input type="number" step="0.01" id="in-low-' + c.code + '"></label>';
     colInput.appendChild(inputs);
     const hint = document.createElement('p');
     hint.className = 'note';
-    hint.innerHTML = isLong
-      ? '做多：進場 = 確認 K 棒高點 +1 檔；停損 = 掃低最低點 −1 檔。'
-      : '做空：進場 = 確認 K 棒低點 −1 檔；停損 = 掃高最高點 +1 檔。<br>（欄位名稱照 K 棒的高低點填，程式會自動判斷方向）';
+    hint.innerHTML =
+      '<b>「掃蕩」是什麼：</b>' + lineWord + '下方' + (isLong ? '' : '（做空是上方）') +
+      '積著一堆停損單，主力先把價格' + (isLong ? '打破支撐、把那些停損單掃掉' : '拉過壓力、把空單的停損掃掉') +
+      '吃到便宜籌碼，然後才真正反手。<b>' + (isLong ? '掃蕩最低價' : '掃蕩最高價') +
+      '</b>就是這根 K 棒插到最' + (isLong ? '深' : '高') + '的那個價格——停損放在它外面一檔，' +
+      '因為價格若再回頭穿過它，就代表「掃蕩後反轉」這個假設已經不成立了。<br>' +
+      (isLong
+        ? '做多：進場 = 確認 K 棒高點 +1 檔；停損 = 掃蕩最低點 −1 檔。'
+        : '做空：進場 = 確認 K 棒低點 −1 檔；停損 = 掃蕩最高點 +1 檔。');
     colInput.appendChild(hint);
     cols.appendChild(colInput);
 
