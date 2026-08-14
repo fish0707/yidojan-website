@@ -13,6 +13,11 @@ name: 探測即時報價來源
 
 on:
   workflow_dispatch:
+    inputs:
+      proxy:
+        description: '要一併驗證的代理網址（Cloudflare Worker 或 GAS，留空則跳過）'
+        required: false
+        default: ''
 
 jobs:
   probe:
@@ -127,6 +132,35 @@ jobs:
           else
             echo "沒有 CORS 標頭 → 瀏覽器直連會被擋，必須走代理"
           fi
+
+      - name: 驗證使用者部署的代理
+        if: inputs.proxy != ''
+        env:
+          PROXY: ${{ inputs.proxy }}
+        run: |
+          # 把網址正規化：使用者常常只給主機名，少了 https://
+          case "$PROXY" in
+            http://*|https://*) URL="$PROXY" ;;
+            *) URL="https://$PROXY" ;;
+          esac
+          URL="${URL%/}"
+          echo "測試對象：$URL"
+          echo
+
+          for action in ping diag "quote&codes=2330"; do
+            echo "───────────────────────────────────────"
+            echo "▶ ?action=$action"
+            code=$(curl -s -o /tmp/p.txt -w '%{http_code}' --max-time 30 "$URL?action=$action") || true
+            echo "  HTTP ${code:-連線失敗}，$(wc -c < /tmp/p.txt) bytes"
+            echo "  回應：$(head -c 600 /tmp/p.txt | tr -d '\n')"
+            echo
+          done
+
+          echo "───────────────────────────────────────"
+          echo "▶ CORS 標頭（瀏覽器要靠這個才叫得動代理）"
+          curl -s -D - -o /dev/null --max-time 30 \
+            -H "Origin: https://fish0707.github.io" \
+            "$URL?action=ping" | grep -i 'access-control\|^HTTP' | tr -d '\r' || echo "  沒有任何 CORS 標頭"
 
       - name: 對照組（已知可用的端點）
         run: |

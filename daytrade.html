@@ -665,11 +665,27 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
 
   let live = null;   // 目前這批候選的監控狀態，換一批資料就整個重建
 
+  /**
+   * 貼上網址時最容易漏掉開頭的 https://。
+   *
+   * 少了它，瀏覽器會把整串當成「相對路徑」——請求跑去打本站自己
+   * （fish0707.github.io/yidojan-website/你的網址），GitHub Pages 找不到就回 404。
+   * 錯誤訊息長得完全不像網址問題，只寫著「HTTP 404」，非常難聯想。
+   * 所以存進去之前一律補上，讀出來時也再跑一次，順便修好之前存錯的值。
+   */
+  function normalizeQuoteUrl(raw) {
+    let s = String(raw || '').trim().replace(/^[<"']+|[>"']+$/g, '');
+    if (!s) return '';
+    if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+    try { new URL(s); } catch (e) { return ''; }
+    return s.replace(/\/+$/, '');
+  }
+
   function getQuoteGasUrl() {
-    try { return localStorage.getItem(QUOTE_GAS_URL_KEY) || ''; } catch (e) { return ''; }
+    try { return normalizeQuoteUrl(localStorage.getItem(QUOTE_GAS_URL_KEY) || ''); } catch (e) { return ''; }
   }
   function setQuoteGasUrl(url) {
-    try { localStorage.setItem(QUOTE_GAS_URL_KEY, url); } catch (e) { /* 無痕模式忽略 */ }
+    try { localStorage.setItem(QUOTE_GAS_URL_KEY, normalizeQuoteUrl(url)); } catch (e) { /* 無痕模式忽略 */ }
   }
 
   function initLiveMonitor(candidates, settings) {
