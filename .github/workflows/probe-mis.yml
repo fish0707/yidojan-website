@@ -104,6 +104,30 @@ jobs:
             sleep 3
           done
 
+      - name: CORS 標頭（決定瀏覽器能不能直連）
+        run: |
+          # 這是最關鍵的一題：若回應帶 Access-Control-Allow-Origin，
+          # 使用者的瀏覽器就能自己抓，整個代理層（GAS / Worker）都不需要。
+          API=https://mis.twse.com.tw/stock/api/getStockInfo.jsp
+          echo "=== 一般請求的回應標頭 ==="
+          curl -s -D - -o /dev/null --max-time 25 \
+            -H "Origin: https://fish0707.github.io" \
+            "$API?ex_ch=tse_2330.tw&json=1&delay=0" | tr -d '\r'
+          echo
+          echo "=== 預檢（OPTIONS）==="
+          curl -s -D - -o /dev/null --max-time 25 -X OPTIONS \
+            -H "Origin: https://fish0707.github.io" \
+            -H "Access-Control-Request-Method: GET" \
+            "$API?ex_ch=tse_2330.tw&json=1&delay=0" | tr -d '\r'
+          echo
+          echo "=== 判讀 ==="
+          if curl -s -D - -o /dev/null --max-time 25 -H "Origin: https://fish0707.github.io" \
+               "$API?ex_ch=tse_2330.tw&json=1&delay=0" | grep -qi 'access-control-allow-origin'; then
+            echo "有 CORS 標頭 → 瀏覽器可以直連，不需要任何代理"
+          else
+            echo "沒有 CORS 標頭 → 瀏覽器直連會被擋，必須走代理"
+          fi
+
       - name: 對照組（已知可用的端點）
         run: |
           echo "這兩支先前實測可用，用來確認不是 GitHub 網路整個連不到證交所"
