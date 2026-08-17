@@ -87,6 +87,16 @@ button.subtle { background: var(--border-light); color: var(--text-dark); }
 }
 .chip.win { background: var(--primary-orange); color: #fff; font-weight: 600; }
 
+.bench { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--border-light); }
+.bench-label { font-size: .76rem; color: var(--text-light); text-align: center; margin-bottom: 8px; }
+.bench-chip {
+  background: #fff; color: var(--text-light);
+  border: 1px dashed var(--accent-orange);
+  font-size: .78rem; padding: 4px 11px; min-height: 0; font-weight: 400;
+  border-radius: 99px; cursor: pointer;
+}
+.bench-chip:hover:not(:disabled) { background: #FFF8F4; color: var(--primary-orange); filter: none; }
+
 /* ── 結果 ── */
 .result-name {
   font-size: 1.5rem; font-weight: 700; color: var(--primary-orange);
@@ -149,7 +159,7 @@ const SPIN_MS = 4200;
 const SEG_COLORS = ['#FF7F3F', '#FFA05C', '#F2653C', '#FFB380', '#E8552F', '#FF8F52'];
 
 const state = {
-  all: [],        // 所有可以進轉盤的餐廳（有上架品項的）
+  all: [],        // 所有可以進轉盤的餐廳（沒被停用的都算）
   picks: [],      // 這一輪抽出來的候選
   winner: null,   // 轉出來的結果
   spinning: false,
@@ -204,7 +214,7 @@ function render() {
   if (state.all.length === 0) {
     el.innerHTML = `<div class="card"><div class="empty">
       還沒有可以抽的餐廳。<br><br>
-      請先到主揪管理頁的「餐廳菜單」分頁新增餐廳與品項。<br><br>
+      請先到主揪管理頁的「餐廳菜單」分頁新增餐廳。<br><br>
       <a href="lunch_admin.html"><button class="ghost">去新增餐廳 →</button></a>
     </div></div>`;
     return;
@@ -212,7 +222,7 @@ function render() {
   if (state.all.length === 1) {
     const only = state.all[0];
     el.innerHTML = `<div class="card"><div class="empty">
-      目前只有「${esc(only.name)}」一間有菜單，不用抽了 🙂
+      目前只有「${esc(only.name)}」一間餐廳，不用抽了 🙂
     </div></div>` + renderResultCard(only);
     return;
   }
@@ -232,6 +242,7 @@ function render() {
             ${esc(r.name)}
           </span>`).join('')}
       </div>
+      ${renderBench()}
       <div class="spin-row">
         <button id="spinBtn" onclick="spin()" ${state.spinning ? 'disabled' : ''}>
           ${state.winner ? '再轉一次' : '開始轉！'}
@@ -283,6 +294,40 @@ function renderResultCard(r) {
                 </div>`).join('')}
             </div>`).join('')}
     </div>`;
+}
+
+/**
+ * 這一輪沒被抽到的餐廳。
+ *
+ * 一定要顯示出來：只列轉盤上那 5 間的話，剛新增餐廳的人會以為自己沒加成功
+ * （「我有新增但沒有出現在轉盤」），其實只是這輪隨機沒抽到而已。
+ * 順便讓它可以直接點上轉盤，想吃哪間就不用一直重抽。
+ */
+function renderBench() {
+  const onWheel = new Set(state.picks.map((r) => r.restaurantId));
+  const bench = state.all.filter((r) => !onWheel.has(r.restaurantId));
+  if (!bench.length) return '';
+
+  return `
+    <div class="bench">
+      <div class="bench-label">這一輪沒抽到的 ${bench.length} 間 · 點一下就換上轉盤</div>
+      <div class="candidates">
+        ${bench.map((r) => `
+          <button class="chip bench-chip" onclick="swapIn('${esc(r.restaurantId)}')"
+            ${state.spinning ? 'disabled' : ''}>${esc(r.name)}</button>`).join('')}
+      </div>
+    </div>`;
+}
+
+/** 把指定餐廳換上轉盤，替掉隨機一格 */
+function swapIn(restaurantId) {
+  if (state.spinning) return;
+  const target = state.all.find((r) => r.restaurantId === restaurantId);
+  if (!target || state.picks.some((r) => r.restaurantId === restaurantId)) return;
+
+  state.picks[Math.floor(Math.random() * state.picks.length)] = target;
+  state.winner = null;
+  render();
 }
 
 /** 跟點餐頁同一套分類順序，看起來才一致 */
