@@ -1,0 +1,1502 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>台股當沖選股 — 流動性掃蕩</title>
+<style>
+:root {
+  --bg: #0e1117;
+  --panel: #161b25;
+  --panel-2: #1d2430;
+  --line: #2a3341;
+  --text: #e6edf3;
+  --muted: #8b98a9;
+  --long: #ff5d5d;   /* 台股習慣：紅漲綠跌 */
+  --short: #35c46b;
+  --accent: #f0a500;
+  --warn: #ffb020;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  background: var(--bg); color: var(--text); line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+.wrap { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+h1 { font-size: 1.4rem; letter-spacing: .02em; }
+h2 { font-size: 1.05rem; margin-bottom: .6rem; color: var(--accent); }
+h3 { font-size: .92rem; color: var(--muted); font-weight: 600; margin-bottom: .4rem; }
+a { color: var(--accent); }
+
+header { border-bottom: 1px solid var(--line); background: var(--panel); }
+header .sub { color: var(--muted); font-size: .85rem; }
+
+.disclaimer {
+  background: #2a1e12; border: 1px solid #5a3d16; color: #f0d5a8;
+  border-radius: 8px; padding: .8rem 1rem; margin: 1rem 0; font-size: .84rem;
+}
+.disclaimer b { color: var(--warn); }
+.disclaimer ul { margin: .4rem 0 0 1.1rem; }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+button {
+  font: inherit; font-size: .88rem; padding: .5rem .9rem; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #1a1200; font-weight: 700; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .8rem; }
+label.field { display: block; font-size: .78rem; color: var(--muted); }
+label.field input, label.field select {
+  display: block; width: 100%; margin-top: .25rem; font: inherit; font-size: .88rem;
+  padding: .4rem .5rem; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text);
+}
+label.check { display: flex; align-items: center; gap: .45rem; font-size: .84rem; cursor: pointer; }
+
+#status { font-size: .84rem; color: var(--muted); margin-top: .6rem; white-space: pre-wrap; }
+.err { color: var(--warn); }
+
+table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+th, td { padding: .5rem .4rem; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: .76rem; }
+th.left, td.left { text-align: left; }
+tr.row { cursor: pointer; }
+tr.row:hover td { background: var(--panel-2); }
+.tablescroll { overflow-x: auto; }
+
+.badge { display: inline-block; padding: .1rem .45rem; border-radius: 4px; font-size: .74rem; font-weight: 700; }
+.badge.long { background: rgba(255,93,93,.15); color: var(--long); }
+.badge.short { background: rgba(53,196,107,.15); color: var(--short); }
+.badge.warn { background: rgba(255,176,32,.15); color: var(--warn); }
+
+.bar { height: 6px; width: 60px; background: var(--panel-2); border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+
+.card { text-align: left; white-space: normal; }
+.card .cols > * { min-width: 0; }
+tr.row.active td { background: rgba(240,165,0,.1); }
+tr.row.active td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.card .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+.kv { display: flex; justify-content: space-between; gap: 1rem; padding: .22rem 0; font-size: .85rem; border-bottom: 1px dashed rgba(255,255,255,.06); }
+.kv span:first-child { color: var(--muted); }
+.kv b { font-variant-numeric: tabular-nums; }
+.big { font-size: 1.15rem; }
+
+.levels { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0; }
+.levels button { font-size: .8rem; padding: .3rem .6rem; }
+.levels button.on { border-color: var(--accent); background: rgba(240,165,0,.15); }
+
+ol.checklist { list-style: none; font-size: .85rem; }
+ol.checklist li { padding: .3rem 0; border-bottom: 1px dashed rgba(255,255,255,.06); }
+ol.checklist label { display: flex; gap: .5rem; align-items: flex-start; cursor: pointer; }
+
+.note { font-size: .78rem; color: var(--muted); margin-top: .5rem; }
+.hint { color: var(--warn); font-size: .8rem; }
+textarea {
+  width: 100%; min-height: 130px; font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: .8rem; padding: .6rem; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); resize: vertical;
+}
+details.explain summary { cursor: pointer; color: var(--accent); font-size: .9rem; padding: .3rem 0; }
+details.explain p, details.explain li { font-size: .85rem; color: var(--muted); }
+details.explain ol, details.explain ul { margin-left: 1.1rem; }
+footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-align: center; }
+.hidden { display: none; }
+@media (max-width: 600px) {
+  .wrap { padding: .7rem; }
+  th, td { padding: .45rem .3rem; font-size: .8rem; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>台股當沖選股 · 流動性掃蕩</h1>
+    <div class="sub">收盤後挑出隔天的候選標的，並算好進場、停損與可買張數</div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="disclaimer">
+    <b>先把話講清楚，這關係到你的錢：</b>
+    <ul>
+      <li>這套規則原本是用在 <b>XAU/USD（黃金）</b>的 15 分鐘線，原文回測 98 筆、勝率 <b>76.53%</b>——不是 95%，而且原文自己聲明<b>沒有計入滑價、手續費與下單延遲</b>，樣本數也不大。移植到台股個股後，勝率必須由你自己用模擬單重新驗證。</li>
+      <li><b>現股當沖需要券商開通資格</b>（開戶滿 3 個月且近一年成交達 10 筆）。當沖沒沖掉就要補足全額股款，否則就是違約交割——每張作戰卡都有標「未沖掉需備款」這個數字，請先確認你補得出來。</li>
+      <li>NT$3,000 在這裡是<b>單筆最大可虧金額</b>，不是買進金額。這個網站不會叫你把 3,000 元拿去買股票。</li>
+      <li>1:1 的獲利目標在台股會被來回約 0.3% 的手續費與證交稅吃掉一大塊。每張卡都會算「損益兩平價差」與「期望值」，<b>期望值是負的標的會被自動剔除</b>。</li>
+      <li>本頁是計算工具，不是投資建議，也不保證任何勝率。</li>
+    </ul>
+  </div>
+
+  <div class="panel">
+    <div class="toolbar">
+      <button class="primary" id="btn-fetch">載入最新收盤並篩選</button>
+      <button id="btn-demo">載入示範資料</button>
+      <button id="btn-paste-toggle">手動貼上資料</button>
+      <button id="btn-settings-toggle">篩選設定</button>
+      <button id="btn-clear">清除本地歷史</button>
+    </div>
+    <div id="status">尚未載入資料。按「載入最新收盤並篩選」開始（第一次會下載 60 個交易日的歷史，需要幾秒）。</div>
+  </div>
+
+  <div class="panel hidden" id="paste-panel">
+    <h2>手動貼上資料</h2>
+    <p class="note">
+      支援兩種格式：<br>
+      1. 直接把 <a href="https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL" target="_blank" rel="noopener">證交所 STOCK_DAY_ALL</a> 的整段 JSON 貼進來（在瀏覽器開那個網址，全選複製）。<br>
+      2. 逗號或 Tab 分隔的表格，每行：<code>代號,名稱,開,高,低,收,量(張)</code>
+    </p>
+    <textarea id="paste-input" placeholder="[{&quot;Code&quot;:&quot;2317&quot;,&quot;Name&quot;:&quot;鴻海&quot;,...}]&#10;或&#10;2317,鴻海,203,206,202.5,205.5,32000"></textarea>
+    <div class="toolbar" style="margin-top:.6rem">
+      <button class="primary" id="btn-paste-run">用這份資料篩選</button>
+      <span class="note" id="paste-note"></span>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="settings-panel">
+    <h2>篩選設定</h2>
+    <div class="grid">
+      <label class="field">單筆風險預算（元）<input type="number" id="set-riskBudget" min="500" step="100"></label>
+      <label class="field">手續費折數（1.0 = 無折扣）<input type="number" id="set-feeDiscount" min="0.05" max="1" step="0.01"></label>
+      <label class="field">K 棒週期（分鐘）
+        <select id="set-candleMinutes">
+          <option value="5">5 分鐘</option>
+          <option value="10">10 分鐘</option>
+          <option value="15">15 分鐘（原策略）</option>
+        </select>
+      </label>
+      <label class="field">最低手續費（元）<input type="number" id="set-minFee" min="0" step="1"></label>
+      <label class="field">股價下限<input type="number" id="set-minPrice" min="1" step="1"></label>
+      <label class="field">股價上限<input type="number" id="set-maxPrice" min="1" step="1"></label>
+      <label class="field">最低成交金額（億）<input type="number" id="set-minTurnoverY" min="0" step="0.5"></label>
+      <label class="field">最低成交量（張）<input type="number" id="set-minVolumeLots" min="0" step="500"></label>
+      <label class="field">最低當沖比重（%）<input type="number" id="set-minDayTradeRatioPct" min="0" max="100" step="1"></label>
+      <label class="field">單檔張數上限<input type="number" id="set-maxLots" min="1" step="1"></label>
+      <label class="field">最多列出幾檔<input type="number" id="set-maxCandidates" min="1" step="1"></label>
+      <label class="field">期望值假設勝率（%）<input type="number" id="set-assumedWinRatePct" min="1" max="99" step="1"></label>
+    </div>
+    <div class="grid" style="margin-top:.8rem">
+      <label class="check"><input type="checkbox" id="set-includeTwse"> 含上市（TWSE）</label>
+      <label class="check"><input type="checkbox" id="set-includeTpex"> 含上櫃（TPEx）</label>
+      <label class="check"><input type="checkbox" id="set-requireDayTradeList"> 只留在當沖標的清單內的股票</label>
+      <label class="check"><input type="checkbox" id="set-requirePositiveExpectancy"> 剔除期望值為負的標的</label>
+    </div>
+    <p class="note">設定會存在這台裝置的瀏覽器裡。「期望值假設勝率」只影響排序參考值，改高不會讓你真的變準。</p>
+    <p class="note" id="set-viability-note"></p>
+  </div>
+
+  <div class="panel" id="result-panel">
+    <h2>隔日候選標的</h2>
+    <div class="tablescroll">
+      <table id="result-table">
+        <thead>
+          <tr>
+            <th class="left">#</th>
+            <th class="left">代號 / 名稱</th>
+            <th>分數</th>
+            <th>方向</th>
+            <th>收盤</th>
+            <th>漲跌%</th>
+            <th>振幅%</th>
+            <th>成交額(億)</th>
+            <th>當沖比</th>
+            <th>進場</th>
+            <th>停損</th>
+            <th>目標</th>
+            <th>張數</th>
+            <th>最大虧損</th>
+            <th>達標獲利</th>
+          </tr>
+        </thead>
+        <tbody id="result-body">
+          <tr><td colspan="15" class="left" style="color:var(--muted)">還沒有資料</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">點任一列展開作戰卡。分數只代表「條件符合程度」，不是勝率，也不是報酬預測。
+    「目標」是跟停損等距的 1:1 停利價，「達標獲利」已扣掉來回手續費與證交稅——
+    這幾個都還是<b>用昨天的支撐壓力估算的</b>，實際價位要等盤中那根確認 K 棒走出來才算數。</p>
+  </div>
+
+  <!-- 作戰卡故意放在表格外面：表格在手機上要橫向捲動，卡片如果塞在 td 裡會被裁掉 -->
+  <div class="panel hidden" id="card-panel"></div>
+
+  <div class="panel hidden" id="live-panel">
+    <h2>盤中即時監控</h2>
+    <p class="note" id="live-hint"></p>
+    <div class="toolbar" style="margin-bottom:.6rem">
+      <button id="btn-live-toggle">開始監控</button>
+      <button id="btn-live-sound">啟用提示音</button>
+      <button id="btn-live-demo">示範盤中訊號</button>
+      <button id="btn-live-diag">連線診斷</button>
+    </div>
+    <div id="live-diag" class="note hidden"></div>
+    <div id="live-scoreboard" class="note"></div>
+    <div id="live-status" class="note"></div>
+    <div class="tablescroll">
+      <table id="live-table">
+        <thead>
+          <tr>
+            <th class="left">代號 / 名稱</th>
+            <th>方向</th>
+            <th>盯的價位</th>
+            <th>即時價</th>
+            <th>本根蠟燭 高/低</th>
+            <th class="left">進 / 損 / 標</th>
+            <th>狀態</th>
+            <th class="left">操作</th>
+          </tr>
+        </thead>
+        <tbody id="live-body"></tbody>
+      </table>
+    </div>
+    <p class="note">
+      這裡的「蠟燭」是用重複輪詢即時報價自己堆出來的近似 15 分鐘 K 棒，不是逐筆繪圖，
+      兩次輪詢之間的瞬間插針可能沒被捕捉到——當輔助提醒用，不要完全依賴它扣扳機。
+      「觀察中」是蠟燭還在形成、暫時符合掃蕩收回；「已確認」才是蠟燭真正收盤後確認，
+      這時作戰卡的進場/停損會自動換成這根蠟燭算出來的精確值。
+    </p>
+  </div>
+
+  <details class="explain panel">
+    <summary>這套策略在做什麼？（四個步驟）</summary>
+    <ol>
+      <li><b>30 EMA 定方向</b>：收盤價在 30 日均線上方，隔天<b>只找做多</b>（掃低後收回）；在下方就<b>只找做空</b>（掃高後收回）。不要逆著均線方向硬做。</li>
+      <li><b>畫出細部支撐壓力</b>：用 Left/Right Bars = 1 的轉折點（原策略特地把預設的 15 改成 1），抓出貼近短線結構的價位——流動性掃蕩往往就發生在這種小轉折上，不是一眼看得出來的大關卡。</li>
+      <li><b>等掃蕩，不是等破線</b>：這是整套策略的核心。價格跌破支撐<b>不進場</b>；要等到那根 15 分鐘 K 棒<b>收盤又收回支撐上方</b>才算數。意思是主力把支撐下方的停損單掃過一輪、吃完籌碼後才真正反手往上推。少了這一步確認，抓到的往往是還沒掃完的假訊號。</li>
+      <li><b>進場、停損、1:1 目標</b>：做多的進場點設在確認收回那根 K 棒的<b>高點</b>；停損放在剛才<b>掃低的最低點</b>；停利距離設成跟停損距離一樣遠（1:1）。刻意用這麼保守的報酬比，是因為這套策略賭的是命中率，不是單筆賺很多——目標設得近才容易達標，拖越久被反打的機率越高。</li>
+    </ol>
+    <p style="margin-top:.6rem"><b>移植到台股時改了什麼：</b>原策略的 Volume Threshold 20 在日線上沒有直接對應，這裡用「該轉折當日成交量 ≥ 近 20 日均量」近似（畫面上標 <b>*</b> 的價位就是）。另外加了台股才有的東西：價格檔位對齊、當沖資格與稅費、漲跌停與處置股排除、以及用 3,000 元風險預算反推張數。</p>
+  </details>
+
+  <details class="explain panel">
+    <summary>資料是怎麼來的？</summary>
+    <p><b>這個網頁不會直接去打證交所。</b>證交所的 API 沒有對瀏覽器發 CORS 授權，網頁直接 fetch 一定失敗。所以改成：<b>GitHub Actions 每個交易日收盤後（台北時間 15:30）在伺服器端抓好資料，commit 進這個 repo</b>，網頁只讀同網域下的 <code>data/</code>——同源，沒有 CORS 問題。</p>
+    <p>歷史資料靠證交所的 <code>MI_INDEX</code>：給它任何一個過去日期，就回傳那天<b>全市場每一檔</b>的開高低收量。所以補 60 個交易日只要 60 個請求，不必一檔一檔抓。<b>30 日均線、ATR 與轉折點從第一次使用就是完整的</b>，不用等一個月。</p>
+    <p>你的瀏覽器會把下載過的日期存進 IndexedDB，所以只有第一次要下載 60 天，之後每天只補新增的那一份。</p>
+    <p>資料來源：證交所 <code>MI_INDEX</code>（每日全市場收盤）、<code>TWTB4U</code>（當沖成交量）、<code>TWTBAU1</code>（暫停先賣後買）、<code>announcement/punish</code>（處置股）。抓取腳本在 <code>scripts/fetch-twse.mjs</code>，排程在 <code>.github/workflows/twse-daily.yml</code>；若某一份抓不到，該維度會降級處理並在狀態列標明，不會整頁壞掉。</p>
+    <p><b>以上都是收盤後的資料，隔天才會更新一次。</b>「盤中即時監控」是另一條完全獨立的路徑：改叫部署好的 Google Apps Script（見 <code>gas/daytrade_quote/README.md</code>）去問證交所的即時報價，一樣是為了避開瀏覽器 CORS 限制。這支只查你篩選出來的候選，用重複輪詢堆出近似的 15 分鐘蠟燭，不是收盤批次那套機制的一部分。</p>
+  </details>
+
+  <footer>
+    本頁為個人試算工具，所有數字僅供參考，不構成投資建議。<br>
+    台股當沖有極高風險，可能在單日內損失超過預期，請自行對每一筆交易負責。
+  </footer>
+</div>
+
+<script src="daytrade.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const SETTINGS_KEY = 'daytrade.settings';
+  const CHECK_KEY = 'daytrade.checks';
+
+  let lastResult = null;
+  let openCode = null;
+
+  // ── 設定存取 ──────────────────────────────────────────────────────────────
+
+  // 畫面欄位跟內部設定的單位不一樣（億 / 百分比比較好填），在這裡轉換。
+  const FIELDS = [
+    ['riskBudget', 'number'], ['feeDiscount', 'number'], ['minFee', 'number'],
+    ['minPrice', 'number'], ['maxPrice', 'number'], ['minVolumeLots', 'number'],
+    ['maxLots', 'number'], ['maxCandidates', 'number'], ['candleMinutes', 'number'],
+    ['includeTwse', 'bool'], ['includeTpex', 'bool'],
+    ['requireDayTradeList', 'bool'], ['requirePositiveExpectancy', 'bool']
+  ];
+
+  function loadSettings() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'); } catch (e) { saved = {}; }
+    return { ...DEFAULT_SETTINGS, ...saved };
+  }
+
+  function settingsToForm(s) {
+    for (const [key, type] of FIELDS) {
+      const el = $('set-' + key);
+      if (!el) continue;
+      if (type === 'bool') el.checked = !!s[key];
+      else el.value = s[key];
+    }
+    $('set-minTurnoverY').value = (s.minTurnover / 1e8).toFixed(1);
+    $('set-minDayTradeRatioPct').value = Math.round(s.minDayTradeRatio * 100);
+    $('set-assumedWinRatePct').value = Math.round(s.assumedWinRate * 100);
+  }
+
+  function formToSettings() {
+    const s = { ...DEFAULT_SETTINGS };
+    for (const [key, type] of FIELDS) {
+      const el = $('set-' + key);
+      if (!el) continue;
+      if (type === 'bool') s[key] = el.checked;
+      else {
+        const v = Number(el.value);
+        if (isFinite(v)) s[key] = v;
+      }
+    }
+    const turn = Number($('set-minTurnoverY').value);
+    if (isFinite(turn)) s.minTurnover = turn * 1e8;
+    const dt = Number($('set-minDayTradeRatioPct').value);
+    if (isFinite(dt)) s.minDayTradeRatio = dt / 100;
+    const wr = Number($('set-assumedWinRatePct').value);
+    if (isFinite(wr)) s.assumedWinRate = wr / 100;
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) { /* 無痕模式會擋，忽略 */ }
+    renderViabilityNote(s);
+    return s;
+  }
+
+  /**
+   * 把「這組設定下，停損距離至少要多大才可能賺」直接算給使用者看。
+   *
+   * 手續費折數與 K 棒週期都會動到這個門檻，但兩者的影響方向剛好相反：
+   * 折數越低→門檻越低（好），K 棒越短→停損越窄→越容易低於門檻（壞）。
+   * 不寫出來的話，使用者很容易以為「改短一點反應比較快」是純好處。
+   */
+  function renderViabilityNote(s) {
+    const el = $('set-viability-note');
+    if (!el) return;
+    const costPct = (0.001425 * s.feeDiscount * 2 + 0.0015);
+    const edge = 2 * s.assumedWinRate - 1;
+    if (edge <= 0) {
+      el.innerHTML = '<span class="hint">假設勝率 ≤ 50% 時，1:1 的策略沒有任何停損距離救得回來。</span>';
+      return;
+    }
+    const minPct = costPct / edge;
+    const mins = s.candleMinutes;
+    // 15 分鐘 K 的高低差大約是日振幅 ÷ √(270/15)；週期越短除得越多
+    const est = (dayRangePct) => dayRangePct / Math.sqrt(270 / mins);
+    const est4 = est(4);
+    const tooShort = est4 < minPct * 100;
+    el.innerHTML =
+      '<b>目前設定下的可獲利門檻：</b>停損距離至少要 <b>' + (minPct * 100).toFixed(2) + '%</b>' +
+      '（50 元股票 ' + (50 * minPct).toFixed(2) + ' 元、30 元股票 ' + (30 * minPct).toFixed(2) + ' 元）。' +
+      '低於這個距離，1:1 扣完成本後就是負期望值。<br>' +
+      '選了 <b>' + mins + ' 分鐘</b> K 棒：日振幅 4% 的股票，單根高低差大約 ' + est4.toFixed(2) + '%，' +
+      (tooShort
+        ? '<span class="hint">低於門檻 ' + (minPct * 100).toFixed(2) + '%——這個週期下多數訊號會被標成「不建議進場」。</span>'
+        : '高於門檻，多數訊號還過得了關。') +
+      (s.feeDiscount >= 1
+        ? '<br><span class="hint">你目前是無折扣。跟券商談到 2.8 折的話，門檻會從 ' +
+          (minPct * 100).toFixed(2) + '% 降到 ' +
+          (((0.001425 * 0.28 * 2 + 0.0015) / edge) * 100).toFixed(2) + '%，可做的機會會多很多。</span>'
+        : '');
+  }
+
+  // ── 盤中檢查表的打勾狀態（依日期 + 代號存，隔天自動歸零）──────────────────
+
+  function loadChecks() {
+    try { return JSON.parse(localStorage.getItem(CHECK_KEY) || '{}'); } catch (e) { return {}; }
+  }
+  function saveCheck(key, value) {
+    const all = loadChecks();
+    const today = new Date().toISOString().slice(0, 10);
+    if (all.date !== today) { for (const k of Object.keys(all)) delete all[k]; all.date = today; }
+    all[key] = value;
+    try { localStorage.setItem(CHECK_KEY, JSON.stringify(all)); } catch (e) { /* 忽略 */ }
+  }
+  function getCheck(key) {
+    const all = loadChecks();
+    const today = new Date().toISOString().slice(0, 10);
+    return all.date === today && !!all[key];
+  }
+
+  // ── 狀態列 ────────────────────────────────────────────────────────────────
+
+  function setStatus(text, isError) {
+    const el = $('status');
+    el.textContent = text;
+    el.className = isError ? 'err' : '';
+  }
+
+  const fmt = (n, d) => n == null || !isFinite(n) ? '—' : Number(n).toFixed(d == null ? 2 : d);
+  const money = (n) => n == null || !isFinite(n) ? '—' : Math.round(n).toLocaleString('zh-TW');
+
+  // ── 篩選流程 ──────────────────────────────────────────────────────────────
+
+  async function runScreen(quotes, extra, sourceLabel, presetHistory) {
+    const settings = formToSettings();
+    let history = presetHistory;
+    let historyDays = 0;
+
+    if (!history) {
+      const loaded = await loadHistory(90);
+      history = loaded.history;
+      historyDays = loaded.days;
+      if (loaded.error) setStatus('本地歷史庫讀取失敗（' + loaded.error + '），這次只用今天的資料計算。', true);
+    }
+
+    const result = screen(quotes, history, extra, settings);
+    lastResult = result;
+    openCode = null;
+    render(result, settings);
+
+    const r = result.rejected;
+    const lines = [
+      sourceLabel + '：掃描 ' + result.scanned + ' 檔 → 候選 ' + result.candidates.length + ' 檔' +
+        (historyDays ? '（本地歷史 ' + historyDays + ' 個交易日）' : ''),
+      '排除：價格帶 ' + r.price + '、量能不足 ' + r.liquidity + '、漲跌停 ' + r.limit +
+        '、處置股 ' + r.punish + '、非當沖標的/當沖比重低 ' + r.dayTradeList +
+        '、無可用價位 ' + r.noLevel + '、3000 元買不起 ' + r.risk + '、期望值為負 ' + r.expectancy
+    ];
+    setStatus(lines.join('\n'));
+  }
+
+  // ── 畫面 ──────────────────────────────────────────────────────────────────
+
+  function render(result, settings) {
+    const body = $('result-body');
+    body.innerHTML = '';
+    $('card-panel').classList.add('hidden');   // 換了一批資料，舊的卡片就不該還留在畫面上
+    $('card-panel').innerHTML = '';
+    stopLiveMonitor();
+    $('live-panel').classList.toggle('hidden', !result.candidates.length);
+    if (!result.candidates.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="15" class="left" style="color:var(--muted)">' +
+        '今天沒有符合條件的標的。這是正常的——當沖不是每天都有好牌，' +
+        '硬要挑一檔出來做才是虧錢的開始。真要放寬，去「篩選設定」調條件，但你等於在降低標準。</td>';
+      body.appendChild(tr);
+      return;
+    }
+    initLiveMonitor(result.candidates, settings);
+
+    result.candidates.forEach((c, i) => {
+      const prev = c.close - (c.change || 0);
+      const chgPct = prev ? (c.change / prev) * 100 : 0;
+      const tr = document.createElement('tr');
+      tr.className = 'row';
+      tr.innerHTML =
+        '<td class="left">' + (i + 1) + '</td>' +
+        '<td class="left"><b>' + c.code + '</b> ' + c.name +
+          (c.dataThin ? ' <span class="badge warn">歷史' + c.historyDays + '天</span>' : '') + '</td>' +
+        '<td><span class="bar"><i style="width:' + c.score.total + '%"></i></span> ' + c.score.total + '</td>' +
+        '<td><span class="badge ' + c.side + '">' + (c.side === 'long' ? '做多' : '做空') + '</span></td>' +
+        '<td>' + fmt(c.close) + '</td>' +
+        '<td style="color:' + (chgPct >= 0 ? 'var(--long)' : 'var(--short)') + '">' + (chgPct >= 0 ? '+' : '') + fmt(chgPct) + '</td>' +
+        '<td>' + fmt(c.metrics.rangePct) + '</td>' +
+        '<td>' + fmt(c.turnover / 1e8, 1) + '</td>' +
+        '<td>' + (c.metrics.dayTradeRatio == null ? '—' : fmt(c.metrics.dayTradeRatio * 100, 0) + '%') + '</td>' +
+        '<td>' + fmt(c.plan.entry) + '</td>' +
+        '<td style="color:var(--long)">' + fmt(c.plan.stop) + '</td>' +
+        '<td style="color:var(--short)">' + fmt(c.plan.target) + '</td>' +
+        '<td>' + c.plan.lots + '</td>' +
+        '<td style="color:var(--long)">' + money(c.plan.netLoss) + '</td>' +
+        '<td style="color:var(--short)">' + money(c.plan.netWin) + '</td>';
+      tr.addEventListener('click', () => toggleCard(c, tr, settings));
+      body.appendChild(tr);
+    });
+  }
+
+  function toggleCard(c, tr, settings) {
+    const panel = $('card-panel');
+    document.querySelectorAll('tr.row').forEach((el) => el.classList.remove('active'));
+    if (openCode === c.code) {          // 再點一次同一列就收起來
+      panel.classList.add('hidden');
+      panel.innerHTML = '';
+      openCode = null;
+      return;
+    }
+    panel.innerHTML = '';
+    panel.appendChild(buildCard(c, settings));
+    panel.classList.remove('hidden');
+    tr.classList.add('active');
+    openCode = c.code;
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function buildCard(c, settings, initialSource) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const isLong = c.side === 'long';
+    const dirWord = isLong ? '做多' : '做空';
+    const lineWord = isLong ? '支撐' : '壓力';
+    const sweepWord = isLong ? '掃低後收回' : '掃高後收回';
+
+    let selectedLevel = c.levels[0];
+    let plan = c.plan;
+
+    const head = document.createElement('div');
+    head.innerHTML =
+      '<h2>' + c.code + ' ' + c.name + '　<span class="badge ' + c.side + '">' + dirWord + '（' + sweepWord + '）</span>' +
+      (c.shortBlocked ? ' <span class="badge warn">暫停先賣後買，今天不能先空</span>' : '') +
+      (c.dataThin ? ' <span class="badge warn">本地歷史僅 ' + c.historyDays + ' 天，均線方向參考性低</span>' : '') +
+      '</h2>' +
+      '<p class="note">收盤 ' + fmt(c.close) + '、30 EMA ' + fmt(c.metrics.ema30) +
+      '，價格在均線' + (isLong ? '上方 → 隔天只找做多訊號' : '下方 → 隔天只找做空訊號') +
+      '。ATR ' + fmt(c.metrics.atr) + '（' + fmt(c.metrics.atrPct) + '%）。</p>';
+    card.appendChild(head);
+
+    const cols = document.createElement('div');
+    cols.className = 'cols';
+
+    // 1) 要盯的價位
+    const colLevels = document.createElement('div');
+    colLevels.innerHTML = '<h3>① 要盯的' + lineWord + '（點一個來試算）</h3>';
+    const levelBox = document.createElement('div');
+    levelBox.className = 'levels';
+    c.levels.forEach((lv, idx) => {
+      const b = document.createElement('button');
+      b.textContent = lv.label + ' ' + fmt(lv.price) + (lv.strong ? ' ★' : '');
+      b.className = idx === 0 ? 'on' : '';
+      b.addEventListener('click', () => {
+        selectedLevel = lv;
+        levelBox.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
+        b.classList.add('on');
+        recalcFromLevel();
+      });
+      levelBox.appendChild(b);
+    });
+    colLevels.appendChild(levelBox);
+    // 這裡不能用 innerHTML += 補說明文字：那會把整個子樹重新解析一次，
+    // 上面那幾顆按鈕的 click 監聽會被一起洗掉，價位就再也切換不動了。
+    const levelNote = document.createElement('p');
+    levelNote.className = 'note';
+    levelNote.innerHTML = '★ = 該轉折當日成交量高於近 20 日均量，是比較有份量的價位。' +
+      '隔天盯的就是這幾條線：價格<b>' + (isLong ? '跌破後又收回線上' : '衝過後又收回線下') + '</b>才算數。';
+    colLevels.appendChild(levelNote);
+    cols.appendChild(colLevels);
+
+    // 2) 盤中確認後重算
+    const colInput = document.createElement('div');
+    colInput.innerHTML = '<h3>② 盤中確認 K 棒出現後，填進來重算</h3>';
+    const inputs = document.createElement('div');
+    inputs.className = 'grid';
+    // 兩個欄位固定對應「那根 K 棒的最高價」與「最低價」，但哪一個是進場、哪一個是停損
+    // 會隨方向對調。標籤一定要把角色寫出來——之前做空時兩欄都寫「最高價」，
+    // 照字面填會把掃蕩高點填進實際需要最低價的欄位，停損距離變成兩檔、張數整個爆掉。
+    inputs.innerHTML = isLong
+      ? '<label class="field">確認 K 棒最高價（→ 進場）<input type="number" step="0.01" id="in-high-' + c.code + '"></label>' +
+        '<label class="field">掃蕩最低價（→ 停損）<input type="number" step="0.01" id="in-low-' + c.code + '"></label>'
+      : '<label class="field">掃蕩最高價（→ 停損）<input type="number" step="0.01" id="in-high-' + c.code + '"></label>' +
+        '<label class="field">確認 K 棒最低價（→ 進場）<input type="number" step="0.01" id="in-low-' + c.code + '"></label>';
+    colInput.appendChild(inputs);
+    const hint = document.createElement('p');
+    hint.className = 'note';
+    hint.innerHTML =
+      '<b>「掃蕩」是什麼：</b>' + lineWord + '下方' + (isLong ? '' : '（做空是上方）') +
+      '積著一堆停損單，主力先把價格' + (isLong ? '打破支撐、把那些停損單掃掉' : '拉過壓力、把空單的停損掃掉') +
+      '吃到便宜籌碼，然後才真正反手。<b>' + (isLong ? '掃蕩最低價' : '掃蕩最高價') +
+      '</b>就是這根 K 棒插到最' + (isLong ? '深' : '高') + '的那個價格——停損放在它外面一檔，' +
+      '因為價格若再回頭穿過它，就代表「掃蕩後反轉」這個假設已經不成立了。<br>' +
+      (isLong
+        ? '做多：進場 = 確認 K 棒高點 +1 檔；停損 = 掃蕩最低點 −1 檔。'
+        : '做空：進場 = 確認 K 棒低點 −1 檔；停損 = 掃蕩最高點 +1 檔。');
+    colInput.appendChild(hint);
+    cols.appendChild(colInput);
+
+    card.appendChild(cols);
+
+    // 3) 數字區
+    const numbers = document.createElement('div');
+    numbers.style.marginTop = '.8rem';
+    card.appendChild(numbers);
+
+    function renderNumbers(source) {
+      const warnLots = plan.lotsCapped
+        ? '<p class="hint">張數已被「單檔張數上限」壓到 ' + plan.lots + ' 張（原本可以 ' + plan.rawLots + ' 張）。</p>' : '';
+      const warnCost = plan.costWarning
+        ? '<p class="hint">⚠ 手續費與證交稅吃掉這筆 1:1 獲利的 ' +
+          Math.round(plan.cost / (plan.stopDistance * plan.shares) * 100) + '%。停損距離太近時，這套策略的優勢會被成本抵銷。</p>' : '';
+      const warnExp = plan.expectancy <= 0
+        ? '<p class="hint">⚠ 用假設勝率 ' + Math.round((settings.assumedWinRate || 0.7653) * 100) + '% 加權後期望值是負的，這筆不值得做。</p>' : '';
+
+      numbers.innerHTML =
+        '<div class="cols">' +
+          '<div>' +
+            '<h3>③ 進場價位（' + source + '）</h3>' +
+            '<div class="kv"><span>進場</span><b class="big" style="color:var(--accent)">' + fmt(plan.entry) + '</b></div>' +
+            '<div class="kv"><span>停損</span><b class="big" style="color:var(--long)">' + fmt(plan.stop) + '</b></div>' +
+            '<div class="kv"><span>目標（1:1）</span><b class="big" style="color:var(--short)">' + fmt(plan.target) + '</b></div>' +
+            '<div class="kv"><span>停損距離</span><b>' + fmt(plan.stopDistance) + ' 元（' + fmt(plan.stopPct) + '%）</b></div>' +
+          '</div>' +
+          '<div>' +
+            '<h3>④ 部位與金額</h3>' +
+            '<div class="kv"><span>可買張數</span><b class="big">' + (plan.tradable ? plan.lots + ' 張' : '不可交易') + '</b></div>' +
+            '<div class="kv"><span>停損出場最大虧損（含成本）</span><b style="color:var(--long)">' + money(plan.netLoss) + ' 元</b></div>' +
+            '<div class="kv"><span>達標獲利（扣完成本）</span><b style="color:var(--short)">' + money(plan.netWin) + ' 元</b></div>' +
+            '<div class="kv"><span>來回成本</span><b>' + money(plan.cost) + ' 元（手續費 ' +
+              money(plan.costDetail.buyFee + plan.costDetail.sellFee) + ' + 證交稅 ' + money(plan.costDetail.tax) + '）</b></div>' +
+            '<div class="kv"><span>損益兩平價差</span><b>' + fmt(plan.breakevenMove) + ' 元（停損距離的 ' +
+              Math.round((plan.breakevenRatio || 0) * 100) + '%）</b></div>' +
+            '<div class="kv"><span>期望值（勝率 ' + Math.round((settings.assumedWinRate || 0.7653) * 100) + '% 加權）</span><b style="color:' +
+              (plan.expectancy > 0 ? 'var(--short)' : 'var(--long)') + '">' + money(plan.expectancy) + ' 元</b></div>' +
+            '<div class="kv"><span>沒沖掉需準備的全額股款</span><b style="color:var(--warn)">' + money(plan.fullPayment) + ' 元</b></div>' +
+          '</div>' +
+        '</div>' + warnLots + warnCost + warnExp;
+    }
+
+    function recalcFromLevel() {
+      const est = estimateLevels(c.side, selectedLevel.price, c.metrics.atr || c.close * 0.02, 2);
+      plan = planTrade(c.side, est.entry, est.stop, settings);
+      renderNumbers('依 ' + selectedLevel.label + ' ' + fmt(selectedLevel.price) + ' 估算，盤中請以實際 K 棒為準');
+    }
+
+    renderNumbers(initialSource || ('依 ' + c.levels[0].label + ' ' + fmt(c.levels[0].price) + ' 估算，盤中請以實際 K 棒為準'));
+
+    function recalcFromBar() {
+      const hi = Number(document.getElementById('in-high-' + c.code).value);
+      const lo = Number(document.getElementById('in-low-' + c.code).value);
+      if (!isFinite(hi) || !isFinite(lo) || hi <= 0 || lo <= 0) return;
+      if (hi < lo) return;
+      const lv = levelsFromBar(c.side, hi, lo);
+      plan = planTrade(c.side, lv.entry, lv.stop, settings);
+      renderNumbers('依你填入的實際 K 棒計算');
+    }
+    inputs.querySelectorAll('input').forEach((el) => el.addEventListener('input', recalcFromBar));
+
+    // 4) 盤中檢查表
+    const checklist = document.createElement('div');
+    checklist.style.marginTop = '.8rem';
+    const items = [
+      '價格已經' + (isLong ? '跌破' + lineWord : '衝過' + lineWord) + '（掃蕩發生了）',
+      '那根 15 分鐘 K 棒<b>收盤</b>又' + (isLong ? '收回' + lineWord + '上方' : '收回' + lineWord + '下方') + '（不是盤中一度收回，是收盤價）',
+      '此刻價格在 30 EMA ' + (isLong ? '上方' : '下方') + '（沒有逆著均線做）',
+      '不是開盤前 15 分鐘（09:00–09:15 的亂流不做）',
+      '離漲跌停還有距離，不會沖不掉',
+      '今天還沒滿 2 筆單，也還沒連續虧 2 筆'
+    ];
+    checklist.innerHTML = '<h3>⑤ 下單前逐項確認（六項全中才准下單）</h3>';
+    const ol = document.createElement('ol');
+    ol.className = 'checklist';
+    items.forEach((text, idx) => {
+      const key = c.code + ':' + idx;
+      const li = document.createElement('li');
+      const label = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = getCheck(key);
+      box.addEventListener('change', () => saveCheck(key, box.checked));
+      const span = document.createElement('span');
+      span.innerHTML = text;
+      label.appendChild(box);
+      label.appendChild(span);
+      li.appendChild(label);
+      ol.appendChild(li);
+    });
+    checklist.appendChild(ol);
+    card.appendChild(checklist);
+
+    const rules = document.createElement('p');
+    rules.className = 'note';
+    rules.innerHTML = '<b>當日紀律：</b>單日最多 2 筆 · 連續 2 筆停損就收工 · 13:00 後不開新倉 · ' +
+      '13:20 前一定要平倉（<b>沒沖掉就要交割 ' + money(plan.fullPayment) + ' 元</b>）· 不加碼、不凹單、不移動停損。';
+    card.appendChild(rules);
+
+    return card;
+  }
+
+  // ── 盤中即時監控 ──────────────────────────────────────────────────────────
+  //
+  // 前面（daytrade.js）已經把「用快照堆蠟燭」「判定掃蕩收回」都做成純函式，
+  // 這裡只是把它們接上輪詢迴圈跟畫面，不重造判定邏輯。
+  // 輪詢節流仿照 lunch.html 的寫法：自我重排的 setTimeout（不是 setInterval，
+  // 避免回應慢時疊加請求）、pollToken 讓分頁重新聚焦時不會產生重複的輪詢鏈、
+  // document.hidden 時自動拉長間隔。
+
+  const QUOTE_GAS_URL_KEY = 'daytrade.quoteGasUrl';
+  const POLL_ACTIVE_MS = 10000;
+  const POLL_HIDDEN_MS = 60000;
+  const POLL_MAX_MS = 60000;    // 連續失敗時退避的上限
+
+  let live = null;   // 目前這批候選的監控狀態，換一批資料就整個重建
+
+  /**
+   * 貼上網址時最容易漏掉開頭的 https://。
+   *
+   * 少了它，瀏覽器會把整串當成「相對路徑」——請求跑去打本站自己
+   * （fish0707.github.io/yidojan-website/你的網址），GitHub Pages 找不到就回 404。
+   * 錯誤訊息長得完全不像網址問題，只寫著「HTTP 404」，非常難聯想。
+   * 所以存進去之前一律補上，讀出來時也再跑一次，順便修好之前存錯的值。
+   */
+  function normalizeQuoteUrl(raw) {
+    let s = String(raw || '').trim().replace(/^[<"']+|[>"']+$/g, '');
+    if (!s) return '';
+    if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+    try { new URL(s); } catch (e) { return ''; }
+    return s.replace(/\/+$/, '');
+  }
+
+  function getQuoteGasUrl() {
+    try { return normalizeQuoteUrl(localStorage.getItem(QUOTE_GAS_URL_KEY) || ''); } catch (e) { return ''; }
+  }
+  function setQuoteGasUrl(url) {
+    try { localStorage.setItem(QUOTE_GAS_URL_KEY, normalizeQuoteUrl(url)); } catch (e) { /* 無痕模式忽略 */ }
+  }
+
+  function initLiveMonitor(candidates, settings) {
+    const items = new Map();
+    for (const c of candidates) {
+      items.set(c.code, {
+        candidate: c,
+        level: c.levels[0].price,
+        candle: null,
+        lastKnownPrice: null,
+        lastTick: null,
+        // idle → watching（蠟燭形成中暫時符合）→ confirmed（蠟燭收盤確認，可以進場了）
+        //     → holding（你按了「我進場了」）→ exited（碰到停利/停損/13:20）
+        status: 'idle',
+        plan: null,              // 訊號確認時算出的建議價位，要存下來，列上跟作戰卡都要用
+        position: null,          // 你實際的持倉：{ side, entry, stop, target, lots, dayHighAtEntry, dayLowAtEntry }
+        exit: null,              // { reason, price, pnl }
+        lateSignal: false,       // 13:00 之後才確認的訊號：顯示但不催你進場
+        viability: null          // 訊號確認後算出的「這筆划不划算」，見 tradeViability()
+      });
+    }
+    live = {
+      items, settings,
+      running: false, demo: false, token: 0, timer: null,
+      audioCtx: null, audioUnlocked: false,
+      nowFn: () => Date.now(),
+      pollErrors: 0
+    };
+    $('btn-live-toggle').textContent = '開始監控';   // 換一批候選要重置按鈕，不然會卡在上一批留下的文字
+    $('live-status').textContent = '';
+    renderLivePanel();
+    updateLiveHint();
+  }
+
+  function stopLiveMonitor() {
+    if (live && live.timer) clearTimeout(live.timer);
+    if (live) { live.running = false; live.token++; }
+  }
+
+  function updateLiveHint() {
+    const url = getQuoteGasUrl();
+    const hint = $('live-hint');
+    if (!url) {
+      hint.innerHTML = '尚未設定即時報價網址。請先部署 <b>Cloudflare Worker</b>' +
+        '（<code>cloudflare/README.md</code>，約兩分鐘）——' +
+        '<b>實測確認證交所擋掉了 Google Apps Script 的 IP</b>，GAS 那條路會一直連線失敗。' +
+        '部署完把網址貼在這裡：' +
+        '<input type="text" id="live-gas-url" placeholder="https://script.google.com/macros/s/xxx/exec" ' +
+        'style="width:100%;margin-top:.4rem;padding:.4rem .5rem;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--text)">';
+      const input = document.getElementById('live-gas-url');
+      input.value = url;
+      input.addEventListener('change', () => { setQuoteGasUrl(input.value.trim()); updateLiveHint(); });
+    } else {
+      hint.innerHTML = '即時報價網址已設定。只監控上方篩選出的 ' + (live ? live.items.size : 0) +
+        ' 檔候選，盤中（09:00–13:30）開著這頁自動輪詢；離開這頁或切到別的分頁太久會自動降頻。' +
+        ' <a href="#" id="live-gas-url-edit">改網址</a>';
+      const edit = document.getElementById('live-gas-url-edit');
+      if (edit) edit.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        setQuoteGasUrl('');
+        updateLiveHint();
+      });
+    }
+  }
+
+  const EXIT_WORD = { target: '停利', stop: '停損', time: '時間到', manual: '手動' };
+
+  function statusLabel(it, nowMs) {
+    if (it.status === 'exited') {
+      const win = it.exit && it.exit.pnl && it.exit.pnl.net > 0;
+      return { text: '已出場（' + EXIT_WORD[it.exit.reason] + '）', cls: win ? 'short' : 'long' };
+    }
+    if (it.status === 'holding') {
+      // 13:10 之後開始倒數，讓你有時間手動平倉，不要拖到 13:20 被迫交割
+      const mins = nowMs != null ? taipeiMinutesOfDay(nowMs) : null;
+      if (mins != null && mins >= FORCE_CLOSE_MINUTES - 10) {
+        return { text: '持倉中 · 剩 ' + Math.max(0, Math.ceil(FORCE_CLOSE_MINUTES - mins)) + ' 分鐘要平倉', cls: 'warn' };
+      }
+      return { text: '持倉中', cls: 'warn' };
+    }
+    if (it.status === 'confirmed') {
+      if (it.viability && !it.viability.viable) {
+        const v = it.viability;
+        return v.impossible
+          ? { text: '不建議進場（數學上不可能賺）', cls: 'long' }
+          : { text: '不建議進場（停損太窄，成本吃光）', cls: 'long' };
+      }
+      return it.lateSignal
+        ? { text: '已確認（過 13:00，不開新倉）', cls: '' }
+        : { text: '已確認', cls: 'warn' };
+    }
+    if (it.status === 'watching') return { text: '觀察中', cls: '' };
+    const idx = it.candle ? it.candle.idx : null;
+    if (idx == null) {
+      // 沒有蠟燭有兩種原因，講清楚是哪一種：真的還沒開盤，還是開盤了但報價抓不到。
+      // 原本一律顯示「等待開盤」，盤中連線失敗時整排都寫等待開盤，會誤導。
+      return (nowMs != null && isMarketHours(nowMs))
+        ? { text: '尚未取得報價', cls: 'warn' }
+        : { text: '等待開盤', cls: '' };
+    }
+    if (idx === 0) return { text: '開盤觀察（前 15 分鐘不算數）', cls: '' };
+    return { text: '監控中', cls: '' };
+  }
+
+  /** 進/損/標 三個數字擠在一格，比拆三欄省寬度，手機才不會爆版 */
+  function levelsCell(it) {
+    const src = it.position || it.plan;
+    if (!src) return '<span style="color:var(--muted)">—</span>';
+    const tag = it.position ? '實際成交' : '建議';
+    const v = it.viability;
+    // 只印三個價格是不夠的——使用者就是因為看不到金額，自己心算才發現那筆賠定了
+    const money_ = v
+      ? '<div style="margin-top:.2rem;border-top:1px dashed rgba(255,255,255,.12);padding-top:.2rem">' +
+        '<div style="color:var(--short)">賺 ' + money(src.netWin) + '</div>' +
+        '<div style="color:var(--long)">賠 ' + money(src.netLoss) + '</div>' +
+        '<div style="color:' + (v.requiredWinRate >= 1 ? 'var(--long)' : 'var(--muted)') + '">需勝率 ' +
+          (v.requiredWinRate >= 1 ? '不可能' : Math.round(v.requiredWinRate * 100) + '%') + '</div>' +
+        '</div>'
+      : '';
+    return '<div style="font-size:.78rem;line-height:1.5">' +
+      '<div style="color:var(--muted)">' + tag + '</div>' +
+      '<div>進 <b>' + fmt(src.entry) + '</b></div>' +
+      '<div style="color:var(--long)">損 ' + fmt(src.stop) + '</div>' +
+      '<div style="color:var(--short)">標 ' + fmt(src.target) + '</div>' +
+      money_ +
+      '</div>';
+  }
+
+  function actionCell(it) {
+    if (it.status === 'confirmed') {
+      // 不划算的訊號不給一顆長得跟平常一樣的按鈕——那等於在慫恿你按下去。
+      // 改成「仍要進場」，而且要再確認一次。
+      if (it.viability && !it.viability.viable) {
+        return '<button data-act="enter-anyway" data-code="' + it.candidate.code +
+          '" style="font-size:.75rem;padding:.25rem .5rem;border-color:var(--long);color:var(--long)">仍要進場</button>';
+      }
+      return '<button data-act="enter" data-code="' + it.candidate.code + '" style="font-size:.78rem;padding:.25rem .5rem">我進場了</button>';
+    }
+    if (it.status === 'holding') {
+      return '<button data-act="close" data-code="' + it.candidate.code + '" style="font-size:.78rem;padding:.25rem .5rem">我出場了</button>';
+    }
+    if (it.status === 'exited' && it.exit && it.exit.pnl) {
+      const net = it.exit.pnl.net;
+      return '<span style="color:' + (net >= 0 ? 'var(--short)' : 'var(--long)') + ';font-weight:700">' +
+        (net >= 0 ? '+' : '') + money(net) + ' 元</span>';
+    }
+    return '';
+  }
+
+  function renderLivePanel() {
+    const body = $('live-body');
+    body.innerHTML = '';
+    if (!live) return;
+    const nowMs = live.nowFn ? live.nowFn() : Date.now();
+    for (const [code, it] of live.items) {
+      const c = it.candidate;
+      const dist = it.lastKnownPrice == null ? '—' : fmt(it.lastKnownPrice - it.level);
+      const hl = it.candle ? (fmt(it.candle.high) + ' / ' + fmt(it.candle.low)) : '—';
+      const st = statusLabel(it, nowMs);
+      const tr = document.createElement('tr');
+      tr.id = 'live-row-' + code;
+      tr.innerHTML =
+        '<td class="left"><b>' + c.code + '</b> ' + c.name + '</td>' +
+        '<td><span class="badge ' + c.side + '">' + (c.side === 'long' ? '做多' : '做空') + '</span></td>' +
+        '<td>' + fmt(it.level) + '</td>' +
+        '<td>' + (it.lastKnownPrice == null ? '—' : fmt(it.lastKnownPrice)) + '（' + dist + '）</td>' +
+        '<td>' + hl + '</td>' +
+        '<td class="left">' + levelsCell(it) + '</td>' +
+        '<td>' + (st.cls ? '<span class="badge ' + st.cls + '">' + st.text + '</span>' : st.text) + '</td>' +
+        '<td class="left">' + actionCell(it) + '</td>';
+      body.appendChild(tr);
+    }
+    renderScoreboard();
+  }
+
+  /**
+   * 今日戰績。作戰卡的紀律欄一直寫著「單日最多 2 筆、連續 2 筆停損就收工」，
+   * 但在有出場結果之前沒有資料可以真的幫使用者盯，現在有了。
+   */
+  function renderScoreboard() {
+    const el = $('live-scoreboard');
+    if (!live) { el.textContent = ''; return; }
+    const done = [...live.items.values()].filter((it) => it.status === 'exited' && it.exit && it.exit.pnl);
+    if (!done.length) { el.textContent = ''; return; }
+    done.sort((a, b) => (a.exit.at || 0) - (b.exit.at || 0));
+    const wins = done.filter((it) => it.exit.pnl.net > 0).length;
+    const total = done.reduce((sum, it) => sum + it.exit.pnl.net, 0);
+
+    let streak = 0;
+    for (let i = done.length - 1; i >= 0; i--) {
+      if (done[i].exit.pnl.net <= 0) streak++; else break;
+    }
+    const holding = [...live.items.values()].some((it) => it.status === 'holding');
+    let stopWork = '';
+    if (streak >= 2) stopWork = '連續 2 筆虧損 —— 今天到此為止，關掉電腦。';
+    else if (done.length >= 2) stopWork = '已達單日 2 筆上限 —— 收工，不要再找機會。';
+
+    el.innerHTML = '<b>今日戰績：</b>' + done.length + ' 筆 · ' + wins + ' 勝 ' + (done.length - wins) + ' 敗 · ' +
+      '累計 <b style="color:' + (total >= 0 ? 'var(--short)' : 'var(--long)') + '">' +
+      (total >= 0 ? '+' : '') + money(total) + ' 元</b>' +
+      (stopWork ? ' <span class="badge warn">' + stopWork + '</span>' : '') +
+      (holding ? ' <span class="badge warn">尚有未平倉部位</span>' : '');
+  }
+
+  function flashRow(code) {
+    const tr = document.getElementById('live-row-' + code);
+    if (!tr) return;
+    tr.style.transition = 'none';
+    tr.style.background = 'rgba(240,165,0,.35)';
+    requestAnimationFrame(() => {
+      tr.style.transition = 'background 1.5s';
+      tr.style.background = '';
+    });
+  }
+
+  // 停利與停損用不同音高，盤中不用盯著螢幕也能用耳朵分辨是好消息還是壞消息
+  const BEEP_HZ = { good: 990, bad: 440, neutral: 880 };
+
+  function beep(kind) {
+    if (!live || !live.audioUnlocked) return;
+    try {
+      const ctx = live.audioCtx;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = BEEP_HZ[kind] || BEEP_HZ.neutral;
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.4);
+    } catch (e) { /* 使用者裝置不支援就算了，畫面上的閃爍還在 */ }
+  }
+
+  /**
+   * 按下「我進場了」：就地展開一個輸入框填實際成交價。
+   * 用真實成交價而不是建議價的理由：實盤成交價不會剛好等於訊號價，
+   * 用建議價算出來的停損距離、張數、損益兩平都會偏離現實。
+   */
+  function promptEntry(code) {
+    const it = live.items.get(code);
+    if (!it || !it.plan) return;
+    const tr = document.getElementById('live-row-' + code);
+    if (!tr) return;
+    const cell = tr.lastElementChild;
+    cell.innerHTML =
+      '<div style="display:flex;gap:.3rem;align-items:center">' +
+      '<input type="number" step="0.01" id="entry-in-' + code + '" value="' + it.plan.entry + '" ' +
+      'style="width:5.5rem;padding:.25rem .4rem;border-radius:5px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:.8rem">' +
+      '<button data-act="enter-ok" data-code="' + code + '" style="font-size:.78rem;padding:.25rem .5rem">確定</button>' +
+      '</div>';
+    const input = document.getElementById('entry-in-' + code);
+    input.focus();
+    input.select();
+    input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') confirmEntry(code); });
+  }
+
+  /** 實際建倉。UI 的「確定」跟示範模式的自動進場都走這裡，確保兩邊算法一致。 */
+  function enterPosition(code, actualPrice) {
+    const it = live.items.get(code);
+    if (!it || !it.plan) return null;
+    if (!isFinite(actualPrice) || actualPrice <= 0) return null;
+
+    const side = it.candidate.side;
+    // 停損維持在原本的掃蕩極值——那是結構性價位，不會因為你成交價不同就跟著移動。
+    // 目標則要以你的實際成交價重算 1:1，這樣算出來的才是你自己的報酬比。
+    const p = planTrade(side, roundToTick(actualPrice, 'nearest'), it.plan.stop, live.settings);
+    // 用實際成交價重算一次——滑價會讓停損距離跟目標都變，划不划算也跟著變
+    it.viability = tradeViability(p, live.settings);
+    const tick = it.lastTick || {};
+    it.position = {
+      side, entry: p.entry, stop: p.stop, target: p.target, lots: p.lots,
+      // 金額也要帶著。levelsCell 在持倉後是讀 position，少了這兩個就會顯示「—」，
+      // 剛好把使用者最需要看到的兩個數字藏起來。
+      netWin: p.netWin, netLoss: p.netLoss, stopDistance: p.stopDistance,
+      dayHighAtEntry: tick.high != null ? tick.high : it.lastKnownPrice,
+      dayLowAtEntry: tick.low != null ? tick.low : it.lastKnownPrice,
+      at: live.nowFn()
+    };
+    it.status = 'holding';
+    return p;
+  }
+
+  function confirmEntry(code) {
+    const input = document.getElementById('entry-in-' + code);
+    const p = enterPosition(code, input ? Number(input.value) : NaN);
+    if (!p) return;
+    renderLivePanel();
+    refreshCardIfOpen(code, p);
+  }
+
+  /** 手動平倉：以目前成交價結算 */
+  function manualClose(code) {
+    const it = live.items.get(code);
+    if (!it || !it.position) return;
+    const price = it.lastKnownPrice != null ? it.lastKnownPrice : it.position.entry;
+    const pnl = realizePnl(it.position.side, it.position.entry, price, it.position.lots, live.settings);
+    it.status = 'exited';
+    it.exit = { reason: 'manual', price, pnl, at: live.nowFn() };
+    renderLivePanel();
+  }
+
+  // 列是每次輪詢重畫的，事件用委派掛在 tbody 上，不然重畫就掉了
+  $('live-body').addEventListener('click', (ev) => {
+    const btn = ev.target.closest('button[data-act]');
+    if (!btn) return;
+    const code = btn.dataset.code;
+    if (btn.dataset.act === 'enter') promptEntry(code);
+    else if (btn.dataset.act === 'enter-anyway') {
+      // 不划算的訊號要多一道確認，並且把最刺眼的數字直接講出來
+      const it = live.items.get(code);
+      const v = it && it.viability;
+      if (!v) return;
+      const why = v.impossible
+        ? '這筆就算完美走到目標價也是賠 ' + money(Math.abs(it.plan.netWin)) + ' 元。'
+        : '這筆需要 ' + Math.round(v.requiredWinRate * 100) + '% 勝率才不賠，'
+          + '停損距離要 ' + fmt(v.minStopDistance) + ' 元以上才划算（現在只有 ' + fmt(it.plan.stopDistance) + '）。';
+      if (confirm(why + '\n\n確定還是要進場嗎？')) promptEntry(code);
+    }
+    else if (btn.dataset.act === 'enter-ok') confirmEntry(code);
+    else if (btn.dataset.act === 'close') manualClose(code);
+  });
+
+  function refreshCardIfOpen(code, livePlan) {
+    if (openCode !== code || !lastResult) return;
+    const c = lastResult.candidates.find((x) => x.code === code);
+    if (!c) return;
+    c.plan = livePlan;
+    const panel = $('card-panel');
+    panel.innerHTML = '';
+    panel.appendChild(buildCard(c, formToSettings(),
+      '盤中即時監控已確認 · 依實際蠟燭高低點計算（非估算）'));
+    panel.classList.remove('hidden');
+  }
+
+  /** 真正的輪詢與示範模式共用同一段：只有 tick 的來源不一樣，判定邏輯完全相同。 */
+  function applyTicks(quotes, nowMs) {
+    const byCode = new Map(quotes.map((q) => [q.code, q]));
+    for (const [code, it] of live.items) {
+      const tick = byCode.get(code) || { price: null };
+      const mins = live.settings.candleMinutes;
+      const { candle, closedCandle } = updateCandle(it.candle, tick, nowMs, it.lastKnownPrice, mins);
+      it.candle = candle;
+      if (tick.price != null) it.lastKnownPrice = tick.price;
+      it.lastTick = tick;
+
+      // ── 已經進場：只管出場，不再找新訊號 ──
+      if (it.status === 'holding') {
+        const hit = evaluateExit(it.position, tick, nowMs);
+        if (hit) {
+          const pnl = realizePnl(it.position.side, it.position.entry, hit.price, it.position.lots, live.settings);
+          it.status = 'exited';
+          it.exit = { reason: hit.reason, price: hit.price, pnl, at: nowMs };
+          flashRow(code);
+          beep(hit.reason === 'target' ? 'good' : 'bad');
+        }
+        continue;
+      }
+      if (it.status === 'exited') continue;   // 一天一檔只做一趟，不重複進場
+
+      // ── 還沒進場：照舊找掃蕩收回訊號 ──
+      if (candle && it.status !== 'confirmed') {
+        const sweepNow = evaluateSweep(candle, it.candidate.side, it.level);
+        it.status = (sweepNow.confirmed && !isOpeningCandle(candle.idx, mins)) ? 'watching' : 'idle';
+      }
+
+      if (closedCandle && it.status !== 'confirmed' && !isOpeningCandle(closedCandle.idx, mins)) {
+        const result = evaluateSweep(closedCandle, it.candidate.side, it.level);
+        if (result.confirmed) {
+          it.status = 'confirmed';
+          const lv = levelsFromBar(it.candidate.side, closedCandle.high, closedCandle.low);
+          // 這份要存下來——列上要顯示進/損/標，按「我進場了」時也要拿它的停損當基準
+          it.plan = planTrade(it.candidate.side, lv.entry, lv.stop, live.settings);
+          // 收盤篩選會擋掉期望值為負的標的，但盤中是拿「實際那根 K 棒的極值」重算停損的，
+          // 常常比收盤估的窄很多。不在這裡再檢查一次，就會像使用者踩到的那筆一樣：
+          // 停損 0.20 元、需要 105% 勝率，工具卻還是播了成立提示音、給了進場按鈕。
+          it.viability = tradeViability(it.plan, live.settings);
+          // 13:00 之後不開新倉，訊號照顯示但不催你（作戰卡紀律欄就是這樣寫的）
+          it.lateSignal = taipeiMinutesOfDay(nowMs) >= NO_NEW_ENTRY_MINUTES;
+          flashRow(code);
+          // 不划算就不出成立音——聲音是在催人動作，不該為一筆賠定的交易響
+          if (!it.lateSignal && it.viability.viable) beep('good');
+          refreshCardIfOpen(code, it.plan);
+        }
+      }
+    }
+    renderLivePanel();
+  }
+
+  async function pollOnce() {
+    const nowMs = live.nowFn();
+    if (!isMarketHours(nowMs)) {
+      $('live-status').textContent = live.demo ? '示範已結束。' : '目前非盤中時間（09:00–13:30），暫不輪詢。';
+      return;
+    }
+    if (live.demo) return;   // 示範模式有自己的推進迴圈，不共用這支
+
+    const url = getQuoteGasUrl();
+    if (!url) { $('live-status').textContent = '尚未設定即時報價網址，見上方說明。'; return; }
+
+    const codes = [...live.items.values()].map((it) => quoteCode(it.candidate));
+    try {
+      const quotes = await fetchQuotes(url, codes);
+      live.pollErrors = 0;
+      live.lastOkMs = nowMs;
+      applyTicks(quotes, nowMs);
+      $('live-status').textContent = '最後更新：' + new Date(nowMs).toLocaleTimeString('zh-TW');
+    } catch (e) {
+      live.pollErrors++;
+      // 原始錯誤裡包著上百字元的網址，整段吐到畫面上使用者看不懂也幫不上忙。
+      // 只留真正有資訊量的那句，完整內容留給「連線診斷」。
+      const reason = String(e.message || '')
+        .replace(/https?:\/\/\S+/g, '（網址略）')
+        .slice(0, 80);
+      const since = live.lastOkMs
+        ? '上次成功更新：' + new Date(live.lastOkMs).toLocaleTimeString('zh-TW')
+        : '從開始監控到現在都沒成功過';
+      $('live-status').textContent =
+        '⚠ 查詢失敗（' + reason + '）· 連續 ' + live.pollErrors + ' 次 · ' + since +
+        (live.pollErrors >= 3 ? ' · 按「連線診斷」查出是哪一段不通' : '');
+    }
+  }
+
+  /**
+   * 連線失敗時要退避，不能照原本的節奏硬打。
+   * 對方若正在擋你，每 10 秒固定重試只會讓情況更糟；成功後立刻回到正常頻率。
+   */
+  function pollDelay() {
+    if (document.hidden) return POLL_HIDDEN_MS;
+    if (!live.pollErrors) return POLL_ACTIVE_MS;
+    return Math.min(POLL_ACTIVE_MS * Math.pow(2, live.pollErrors), POLL_MAX_MS);
+  }
+
+  function scheduleNextPoll() {
+    if (!live || !live.running) return;
+    const token = live.token;
+    live.timer = setTimeout(async () => {
+      if (!live || live.token !== token || !live.running) return;
+      await pollOnce();
+      scheduleNextPoll();
+    }, pollDelay());
+  }
+
+  function startLiveMonitor() {
+    if (!live || live.running) return;
+    live.running = true;
+    live.demo = false;
+    live.token++;
+    live.nowFn = () => Date.now();   // 跑過示範之後時鐘還停在模擬時間，這裡要換回真的
+    $('btn-live-toggle').textContent = '停止監控';
+    pollOnce().then(scheduleNextPoll);
+  }
+
+  function stopLiveMonitorUi() {
+    stopLiveMonitor();
+    if (live) $('btn-live-toggle').textContent = '開始監控';
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (live && live.running && !document.hidden) {
+      // 分頁重新聚焦，立刻補一次，不要等到下一輪隱藏時的長間隔
+      if (live.timer) clearTimeout(live.timer);
+      live.token++;
+      pollOnce().then(scheduleNextPoll);
+    }
+  });
+
+  // ── 示範盤中訊號 ─────────────────────────────────────────────────────────
+  //
+  // 沙箱環境連不到證交所、也沒有真的部署 GAS，這支示範用假造的快照序列跑過
+  // updateCandle/evaluateSweep 同一套程式碼，讓整個監控流程（蠟燭聚合 → 觀察中
+  // → 收盤確認 → 作戰卡更新 → 提示音）可以在不接真實資料的情況下被驗證。
+  // 用假的時鐘（nowFn）而不是真的 Date.now()，所以不管現在幾點都能示範完整流程。
+
+  const DEMO_ENTER_MINUTE = 31;    // 訊號在第 30 分確認，隔一分鐘自動示範「我進場了」
+  const DEMO_EXIT_MINUTE = 40;     // 走到這一分鐘會觸及停利或停損
+
+  function buildDemoScript(codes) {
+    // 每檔股票各自的走勢腳本：[{minute相對09:00, price}]，中間的分鐘用前一個值補。
+    // 09:00-09:14 開盤觀察（不算數）→ 09:15-09:29 這根蠟燭先掃過關鍵價位、尾段收回
+    // → 第 30 分收盤確認 → 第 31 分自動進場 → 之後走到停利或停損。
+    //
+    // 刻意讓單數檔走到停損：一整排都停利的示範會讓人以為這套穩賺，
+    // 實際上這策略就是靠勝率不是靠不會輸，示範也該照實演一次虧損。
+    const scripts = {};
+    codes.forEach((code, i) => {
+      const it = live.items.get(code);
+      const L = it.level;
+      const dir = it.candidate.side === 'long' ? 1 : -1;
+      scripts[code] = {
+        willWin: i % 2 === 0,
+        points: [
+          { m: 0, price: L + dir * 0.4 },
+          { m: 14, price: L + dir * 0.35 },
+          { m: 15, price: L + dir * 0.3 },
+          { m: 19, price: L - dir * 0.3 },     // 掃過關鍵價位
+          { m: 24, price: L - dir * 0.1 },
+          { m: 28, price: L + dir * 0.4 },     // 收回 → 這根蠟燭收盤確認
+          { m: 30, price: L + dir * 0.4 }
+        ]
+      };
+    });
+    return scripts;
+  }
+
+  /**
+   * 進場之後的示範價格：直接朝「這一檔實際算出來的停利或停損價」走。
+   *
+   * 一開始是用固定的價格偏移量寫死的，但停損距離是由確認蠟燭的高低點決定的，
+   * 每檔都不一樣——寫死的偏移量對某些檔根本碰不到目標，示範就卡在持倉中演不完。
+   * 改成拿 position 的實際價位當終點，超過一點點確保跨過去。
+   */
+  function demoPriceAfterEntry(pos, willWin, minute) {
+    const goal = willWin ? pos.target : pos.stop;
+    const span = Math.max(1, DEMO_EXIT_MINUTE - DEMO_ENTER_MINUTE);
+    const t = Math.min(1, (minute - DEMO_ENTER_MINUTE) / span);
+    return pos.entry + (goal - pos.entry) * t * 1.05;
+  }
+
+  function startLiveDemo() {
+    if (!live) return;
+    stopLiveMonitor();
+    live.running = true;
+    live.demo = true;
+    live.token++;
+    const token = live.token;
+
+    const codes = [...live.items.keys()];
+    const scripts = buildDemoScript(codes);
+    // 重置狀態，示範可以重複按
+    for (const it of live.items.values()) {
+      it.candle = null; it.lastKnownPrice = null; it.lastTick = null;
+      it.status = 'idle'; it.plan = null; it.position = null; it.exit = null;
+      it.lateSignal = false; it.viability = null;
+    }
+    const dayRange = new Map();   // 累計日高日低，模擬證交所回的那兩個欄位
+    renderLivePanel();
+
+    const today = new Date().toISOString().slice(0, 10);
+    const baseMs = Date.parse(today + 'T00:00:00Z') + 9 * 3600000 - 8 * 3600000;   // 今天 09:00 台北時間
+    let minute = 0;
+    const totalMinutes = 44;
+    live.nowFn = () => baseMs + minute * 60000;
+
+    $('live-status').textContent = '示範播放中…（模擬時鐘，跟現在實際時間無關）';
+
+    const step = () => {
+      if (!live || live.token !== token) return;
+      const nowMs = live.nowFn();
+      const quotes = codes.map((code) => {
+        const sc = scripts[code];
+        const it = live.items.get(code);
+        let price;
+        if (it.position && minute > DEMO_ENTER_MINUTE) {
+          price = demoPriceAfterEntry(it.position, sc.willWin, minute);
+        } else {
+          price = sc.points[0].price;
+          for (const point of sc.points) { if (point.m <= minute) price = point.price; }
+        }
+        price = roundToTick(price, 'nearest');
+        const r = dayRange.get(code) || { high: price, low: price };
+        r.high = Math.max(r.high, price);
+        r.low = Math.min(r.low, price);
+        dayRange.set(code, r);
+        return { code, price, high: r.high, low: r.low };
+      });
+      applyTicks(quotes, nowMs);
+
+      // 示範自動按下「我進場了」，用建議進場價成交，好把出場那一段也演完
+      if (minute === DEMO_ENTER_MINUTE) {
+        for (const [code, it] of live.items) {
+          if (it.status === 'confirmed' && it.plan) enterPosition(code, it.plan.entry);
+        }
+        renderLivePanel();
+      }
+
+      minute += 1;
+      if (minute > totalMinutes) {
+        live.running = false;
+        $('live-status').textContent =
+          '示範播放完畢：走完了「觀察中 → 已確認 → 進場 → 停利/停損出場」的完整來回。' +
+          '真正盤中會由 GAS 即時報價驅動同一套邏輯。';
+        return;
+      }
+      live.timer = setTimeout(step, 200);   // 每 200ms 真實時間推進 1 分鐘模擬時間
+    };
+    step();
+  }
+
+  $('btn-live-toggle').addEventListener('click', () => {
+    if (!live) return;
+    if (live.running && !live.demo) stopLiveMonitorUi();
+    else startLiveMonitor();
+  });
+
+  $('btn-live-sound').addEventListener('click', () => {
+    if (!live) return;
+    try {
+      if (!live.audioCtx) live.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      live.audioCtx.resume();
+      live.audioUnlocked = true;
+      $('btn-live-sound').textContent = '提示音已啟用 ✓';
+      beep();
+    } catch (e) {
+      $('btn-live-sound').textContent = '這台裝置不支援提示音';
+    }
+  });
+
+  $('btn-live-demo').addEventListener('click', startLiveDemo);
+
+  // ── 連線診斷 ─────────────────────────────────────────────────────────────
+  //
+  // 「查詢失敗」四個字幫不上任何忙——到底是網址填錯、代理沒部署好、還是代理
+  // 連不到證交所？這顆按鈕把整條鏈路逐段測過，直接指出斷在哪一段。
+  //
+  // 已經實測確認的兩件事（用 GitHub Actions 從資料中心 IP 打同一支 API）：
+  //   1. 證交所這支 API 沒有發 CORS 標頭 → 瀏覽器一定連不到，代理是必要的
+  //   2. 資料中心 IP 打得通、不限流 → 連不上是「這個代理的出口 IP 被擋」
+
+  async function runDiagnostics() {
+    const box = $('live-diag');
+    box.classList.remove('hidden');
+    const lines = ['<b>連線診斷</b>'];
+    const paint = () => { box.innerHTML = lines.join('<br>'); };
+    lines.push('診斷中…');
+    paint();
+    lines.pop();
+
+    // 1) 瀏覽器直連（已知會失敗，但實際跑一次才能確定不是別的原因）
+    try {
+      await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_2330.tw&json=1&delay=0',
+        { mode: 'cors' });
+      lines.push('✅ <b>瀏覽器直連證交所</b>：竟然成功了——那可以完全不用代理，跟我說一聲。');
+    } catch (e) {
+      lines.push('❌ <b>瀏覽器直連證交所</b>：被 CORS 擋下（預期中，證交所沒發 CORS 標頭）。'
+        + '<span class="note">所以一定要有代理，這一項失敗是正常的。</span>');
+    }
+
+    // 2) 代理
+    const url = getQuoteGasUrl();
+    if (!url) {
+      lines.push('❌ <b>代理</b>：還沒填網址。');
+      paint();
+      return;
+    }
+    try {
+      const data = await fetchJson(url + (url.includes('?') ? '&' : '?') + 'action=diag', 20000);
+      if (data && data.status === 'success') {
+        const where = data.source === 'cloudflare-worker' ? 'Cloudflare Worker' : 'Google Apps Script';
+        const good = data.okCount > 0;
+        lines.push((good ? '✅' : '❌') + ' <b>' + where + ' → 證交所</b>：' + data.summary);
+        (data.tests || []).forEach((t) => {
+          lines.push('　　' + (t.ok ? '✅' : '❌') + ' ' + t.name + '：' + t.note);
+        });
+        if (!good && where === 'Google Apps Script') {
+          lines.push('<span class="hint">結論：Google 的 IP 被證交所擋掉了，改請求寫法沒有用。'
+            + '請改部署 Cloudflare Worker（見 <code>cloudflare/README.md</code>），把網址換掉就好。</span>');
+        }
+      } else {
+        lines.push('❌ <b>代理</b>：回應異常 —— ' + ((data && data.error) || '格式不對'));
+      }
+    } catch (e) {
+      lines.push('❌ <b>代理</b>：叫不動（' + String(e.message).slice(0, 60) + '）。'
+        + '<span class="note">網址可能填錯，或部署時「具有存取權的使用者」沒設成「任何人」。</span>');
+    }
+
+    // 3) 實際查一次報價，確認端到端
+    try {
+      const qs = await fetchQuotes(url, ['tse_2330']);
+      const p = qs && qs[0] ? qs[0].price : null;
+      lines.push('✅ <b>端到端查一檔（台積電）</b>：' +
+        (p == null ? '有回應但目前無成交價（非交易時段是正常的）' : '成交價 ' + p));
+    } catch (e) {
+      lines.push('❌ <b>端到端查一檔</b>：' + String(e.message).slice(0, 60));
+    }
+    paint();
+  }
+
+  $('btn-live-diag').addEventListener('click', () => {
+    $('btn-live-diag').disabled = true;
+    runDiagnostics().finally(() => { $('btn-live-diag').disabled = false; });
+  });
+
+  // ── 事件 ──────────────────────────────────────────────────────────────────
+
+  $('btn-settings-toggle').addEventListener('click', () => $('settings-panel').classList.toggle('hidden'));
+  ['set-feeDiscount', 'set-candleMinutes', 'set-assumedWinRatePct'].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener('change', () => renderViabilityNote(formToSettings()));
+  });
+  $('btn-paste-toggle').addEventListener('click', () => $('paste-panel').classList.toggle('hidden'));
+
+  $('btn-fetch').addEventListener('click', async () => {
+    const btn = $('btn-fetch');
+    btn.disabled = true;
+    setStatus('載入資料中…');
+    try {
+      const settings = formToSettings();
+      const { quotes, extra, errors, latestDate, totalDays, updated } = await fetchMarketData(
+        settings,
+        (done, total) => {
+          // 第一次要下載 60 天，會跑幾秒，沒有進度會讓人以為當掉了
+          if (total > 1) setStatus(`第一次使用要把歷史補齊：已下載 ${done} / ${total} 個交易日…`);
+        }
+      );
+      if (!quotes.length) {
+        setStatus('資料檔裡沒有任何個股。\n' + errors.join('\n'), true);
+        return;
+      }
+      await runScreen(quotes, extra, `收盤日 ${latestDate}（歷史 ${totalDays} 個交易日）`);
+      const foot = [];
+      if (updated) foot.push('資料更新時間：' + new Date(updated).toLocaleString('zh-TW'));
+      if (errors.length) foot.push('部分資料有問題（已降級處理）：\n' + errors.join('\n'));
+      if (foot.length) setStatus($('status').textContent + '\n\n' + foot.join('\n\n'));
+    } catch (e) {
+      setStatus('載入失敗：' + e.message +
+        '\n\n這代表 data/ 底下還沒有資料——通常是每日排程還沒跑過第一次。' +
+        '可以到 repo 的 Actions 頁手動執行一次「抓取台股收盤資料」，或先用「手動貼上資料」。', true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $('btn-paste-run').addEventListener('click', async () => {
+    const { quotes, errors } = parsePasted($('paste-input').value);
+    $('paste-note').textContent = errors.length ? errors.slice(0, 3).join('；') : '';
+    if (!quotes.length) { setStatus('貼上的資料解析不出任何個股。\n' + errors.join('\n'), true); return; }
+    const today = new Date().toISOString().slice(0, 10);
+    quotes.forEach((q) => { q.date = today; });
+    try { await saveDay(today, quotes); } catch (e) { /* 貼上的資料存不進去不影響這次計算 */ }
+    // 貼上的資料沒有當沖清單，把「只留當沖標的」的限制自動放掉，否則會全部被剔除
+    await runScreen(quotes, { dayTrade: null, noShortSell: null, punish: null }, '手動貼上資料');
+    setStatus($('status').textContent +
+      '\n\n注意：手動貼上模式沒有當沖標的清單、處置股與禁先賣後買資料，這三項限制無法自動檢查，請自行確認。');
+  });
+
+  $('btn-demo').addEventListener('click', async () => {
+    const demo = demoData();
+    demo.quotes.forEach((q) => { q.date = '2026-08-11'; });
+    await runScreen(demo.quotes, demo.extra, '示範資料', demo.history);
+    setStatus($('status').textContent +
+      '\n\n這是假造的資料，用來讓你看清楚各種排除規則怎麼運作（含一檔漲停鎖死、一檔量能不足、一檔高價買不起）。不要拿來下單。');
+  });
+
+  $('btn-clear').addEventListener('click', async () => {
+    if (!confirm('確定清除這台裝置上累積的歷史日 K？清掉之後 30 日均線要重新累積。')) return;
+    try {
+      indexedDB.deleteDatabase('daytrade');
+      setStatus('本地歷史已清除。');
+    } catch (e) {
+      setStatus('清除失敗：' + e.message, true);
+    }
+  });
+
+  // ── 起始 ──────────────────────────────────────────────────────────────────
+
+  settingsToForm(loadSettings());
+  renderViabilityNote(loadSettings());
+  loadHistory(90).then((h) => {
+    if (h.days > 0) {
+      setStatus('本地歷史庫已有 ' + h.days + ' 個交易日的資料' +
+        (h.days < 30 ? '（還不足 30 天，均線方向的參考性偏低）' : '') +
+        '。按「抓取今日收盤並篩選」開始。');
+    }
+  }).catch(() => { /* 沒有歷史庫是正常的第一次使用 */ });
+})();
+</script>
+</body>
+</html>

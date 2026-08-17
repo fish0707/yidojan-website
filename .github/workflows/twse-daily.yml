@@ -1,0 +1,61 @@
+name: 抓取台股收盤資料
+
+# 台股 13:30 收盤，資料上架有延遲，所以台北時間 15:30 才抓（= UTC 07:30）。
+# 週末不跑；國定假日照跑但抓不到資料，腳本會自己記成假日跳過。
+on:
+  schedule:
+    - cron: '30 7 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '要保留幾個交易日'
+        required: false
+        default: '60'
+      force:
+        description: '連已經有的日期也重抓'
+        type: boolean
+        required: false
+        default: false
+
+# 同時只跑一個，避免排程和手動觸發撞在一起互相覆蓋
+concurrency:
+  group: twse-data
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 抓取資料
+        run: |
+          node scripts/fetch-twse.mjs \
+            --days "${{ inputs.days || '60' }}" \
+            ${{ inputs.force == true && '--force' || '' }}
+
+      - name: 提交結果
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data
+          if git diff --staged --quiet; then
+            echo "資料沒有變化，不做 commit"
+            exit 0
+          fi
+          LATEST=$(node -e "console.log(require('./data/index.json').latest)")
+          DAYS=$(node -e "console.log(require('./data/index.json').days.length)")
+          git commit -m "更新台股收盤資料至 ${LATEST}（共 ${DAYS} 個交易日）"
+          # 排程之間可能有人推了別的 commit，先 rebase 再推，衝突就重試
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            echo "推送失敗，第 $i 次重試"
+            sleep $((i * 5))
+          done
+          exit 1

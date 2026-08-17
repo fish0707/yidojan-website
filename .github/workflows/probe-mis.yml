@@ -1,0 +1,173 @@
+name: 探測即時報價來源
+
+# 一次性的診斷工具，不排程、只手動觸發。
+#
+# 背景：Google Apps Script 代理打 mis.twse.com.tw 時在「連線層」就失敗
+# （UrlFetchApp 拋例外而不是回 HTTP 錯誤碼），推測是證交所擋掉了 Google 的 IP 段。
+# 這支的目的是換一個網路位置實測：GitHub 的資料中心 IP 連不連得到、要帶什麼標頭才通。
+#
+# 為什麼重要：先前已證實 GitHub 連得到 www.twse.com.tw 與 openapi.twse.com.tw
+# （60 個交易日的收盤資料都是這樣抓的）。如果這裡也連得到 mis.twse.com.tw，
+# 那 Cloudflare Worker 幾乎一定可行；如果這裡也被擋，代表證交所擋的是整類資料中心 IP，
+# 那唯一的活路就是使用者自己的瀏覽器直連——不必讓使用者白跑一趟部署。
+
+on:
+  workflow_dispatch:
+    inputs:
+      proxy:
+        description: '要一併驗證的代理網址（Cloudflare Worker 或 GAS，留空則跳過）'
+        required: false
+        default: ''
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 基本連通性
+        run: |
+          echo "=== DNS ==="
+          getent hosts mis.twse.com.tw || echo "DNS 解析失敗"
+          echo
+          echo "=== TCP 443 ==="
+          timeout 10 bash -c 'cat < /dev/null > /dev/tcp/mis.twse.com.tw/443' \
+            && echo "TCP 443 可連線" || echo "TCP 443 連不上"
+          echo
+          echo "=== 出口 IP ==="
+          curl -s --max-time 10 https://api.ipify.org || echo "(取不到)"
+          echo
+
+      - name: 變體測試
+        run: |
+          API=https://mis.twse.com.tw/stock/api/getStockInfo.jsp
+          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+          REF='https://mis.twse.com.tw/stock/fibest.jsp'
+          TS=$(date +%s)000
+
+          # $1=標題 $2...=curl 額外參數
+          probe () {
+            local title="$1"; shift
+            echo "───────────────────────────────────────"
+            echo "▶ $title"
+            local code
+            code=$(curl -s -o /tmp/body.txt -w '%{http_code}' --max-time 25 "$@" 2>/tmp/err.txt) || true
+            if [ -z "$code" ] || [ "$code" = "000" ]; then
+              echo "  結果：連線失敗（沒有拿到 HTTP 回應）"
+              echo "  curl 錯誤：$(head -c 200 /tmp/err.txt)"
+            else
+              echo "  HTTP $code，回應 $(wc -c < /tmp/body.txt) bytes"
+              echo "  開頭：$(head -c 300 /tmp/body.txt | tr -d '\n')"
+            fi
+            echo
+          }
+
+          probe "1. 最陽春：單一檔、無任何標頭" \
+            "$API?ex_ch=tse_2330.tw&json=1&delay=0"
+
+          probe "2. 帶瀏覽器 User-Agent" \
+            -H "User-Agent: $UA" \
+            "$API?ex_ch=tse_2330.tw&json=1&delay=0"
+
+          probe "3. 帶 User-Agent + Referer" \
+            -H "User-Agent: $UA" -H "Referer: $REF" \
+            "$API?ex_ch=tse_2330.tw&json=1&delay=0"
+
+          echo "───────────────────────────────────────"
+          echo "▶ 4. 先取 Cookie 再打 API"
+          curl -s -c /tmp/cookies.txt -o /tmp/index.txt -w '  index.jsp → HTTP %{http_code}\n' \
+            --max-time 25 -H "User-Agent: $UA" \
+            https://mis.twse.com.tw/stock/index.jsp || echo "  index.jsp 連線失敗"
+          echo "  取到的 Cookie：$(grep -c . /tmp/cookies.txt 2>/dev/null || echo 0) 行"
+          probe "   4b. 帶 Cookie 打 API" \
+            -b /tmp/cookies.txt -H "User-Agent: $UA" -H "Referer: $REF" \
+            "$API?ex_ch=tse_2330.tw&json=1&delay=0"
+
+          # 目前 GAS 的寫法是 encodeURIComponent，管線符號會變成 %7C。
+          # 有些伺服器對這個很挑，兩種都試。
+          probe "5. 多檔・管線符號編碼成 %7C（= 目前 GAS 的寫法）" \
+            -H "User-Agent: $UA" -H "Referer: $REF" \
+            "$API?ex_ch=tse_2330.tw%7Ctse_2317.tw%7Ctse_2884.tw&json=1&delay=0&_=$TS"
+
+          probe "6. 多檔・管線符號不編碼" \
+            -H "User-Agent: $UA" -H "Referer: $REF" -g \
+            "$API?ex_ch=tse_2330.tw|tse_2317.tw|tse_2884.tw&json=1&delay=0&_=$TS"
+
+          probe "7. 十二檔（跟使用者實際監控的數量一樣）" \
+            -H "User-Agent: $UA" -H "Referer: $REF" -g \
+            "$API?ex_ch=tse_3481.tw|tse_2884.tw|tse_2887.tw|tse_2618.tw|tse_1102.tw|tse_1326.tw|tse_1504.tw|tse_2634.tw|tse_2886.tw|tse_2891.tw|tse_3149.tw|tse_4904.tw&json=1&delay=0&_=$TS"
+
+      - name: 連續請求（測有沒有被限流）
+        run: |
+          API=https://mis.twse.com.tw/stock/api/getStockInfo.jsp
+          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+          echo "每 3 秒打一次，共 6 次——看是不是打幾次之後才開始被擋"
+          for i in $(seq 1 6); do
+            code=$(curl -s -o /tmp/b.txt -w '%{http_code}' --max-time 20 \
+              -H "User-Agent: $UA" -H "Referer: https://mis.twse.com.tw/stock/fibest.jsp" \
+              "$API?ex_ch=tse_2330.tw&json=1&delay=0&_=$(date +%s)000") || true
+            size=$(wc -c < /tmp/b.txt)
+            echo "  第 $i 次：HTTP ${code:-連線失敗}，$size bytes"
+            sleep 3
+          done
+
+      - name: CORS 標頭（決定瀏覽器能不能直連）
+        run: |
+          # 這是最關鍵的一題：若回應帶 Access-Control-Allow-Origin，
+          # 使用者的瀏覽器就能自己抓，整個代理層（GAS / Worker）都不需要。
+          API=https://mis.twse.com.tw/stock/api/getStockInfo.jsp
+          echo "=== 一般請求的回應標頭 ==="
+          curl -s -D - -o /dev/null --max-time 25 \
+            -H "Origin: https://fish0707.github.io" \
+            "$API?ex_ch=tse_2330.tw&json=1&delay=0" | tr -d '\r'
+          echo
+          echo "=== 預檢（OPTIONS）==="
+          curl -s -D - -o /dev/null --max-time 25 -X OPTIONS \
+            -H "Origin: https://fish0707.github.io" \
+            -H "Access-Control-Request-Method: GET" \
+            "$API?ex_ch=tse_2330.tw&json=1&delay=0" | tr -d '\r'
+          echo
+          echo "=== 判讀 ==="
+          if curl -s -D - -o /dev/null --max-time 25 -H "Origin: https://fish0707.github.io" \
+               "$API?ex_ch=tse_2330.tw&json=1&delay=0" | grep -qi 'access-control-allow-origin'; then
+            echo "有 CORS 標頭 → 瀏覽器可以直連，不需要任何代理"
+          else
+            echo "沒有 CORS 標頭 → 瀏覽器直連會被擋，必須走代理"
+          fi
+
+      - name: 驗證使用者部署的代理
+        if: inputs.proxy != ''
+        env:
+          PROXY: ${{ inputs.proxy }}
+        run: |
+          # 把網址正規化：使用者常常只給主機名，少了 https://
+          case "$PROXY" in
+            http://*|https://*) URL="$PROXY" ;;
+            *) URL="https://$PROXY" ;;
+          esac
+          URL="${URL%/}"
+          echo "測試對象：$URL"
+          echo
+
+          for action in ping diag "quote&codes=2330"; do
+            echo "───────────────────────────────────────"
+            echo "▶ ?action=$action"
+            code=$(curl -s -o /tmp/p.txt -w '%{http_code}' --max-time 30 "$URL?action=$action") || true
+            echo "  HTTP ${code:-連線失敗}，$(wc -c < /tmp/p.txt) bytes"
+            echo "  回應：$(head -c 600 /tmp/p.txt | tr -d '\n')"
+            echo
+          done
+
+          echo "───────────────────────────────────────"
+          echo "▶ CORS 標頭（瀏覽器要靠這個才叫得動代理）"
+          curl -s -D - -o /dev/null --max-time 30 \
+            -H "Origin: https://fish0707.github.io" \
+            "$URL?action=ping" | grep -i 'access-control\|^HTTP' | tr -d '\r' || echo "  沒有任何 CORS 標頭"
+
+      - name: 對照組（已知可用的端點）
+        run: |
+          echo "這兩支先前實測可用，用來確認不是 GitHub 網路整個連不到證交所"
+          for u in \
+            "https://openapi.twse.com.tw/v1/exchangeReport/TWTBAU1" \
+            "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date=20260812&type=ALLBUT0999&response=json" ; do
+            code=$(curl -s -o /tmp/c.txt -w '%{http_code}' --max-time 25 "$u") || true
+            echo "  HTTP ${code:-連線失敗}  $(wc -c < /tmp/c.txt) bytes  ← $u"
+          done
