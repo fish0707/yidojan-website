@@ -440,7 +440,10 @@ function renderOpenView() {
     ${renderNameCard()}
     ${state.myOrder && !state.editing ? renderMyOrderCard() : renderPickerCard()}
     ${renderEveryoneCard()}
-    <div class="footer-link"><a href="lunch_admin.html">主揪管理頁 →</a></div>
+    <div class="footer-link">
+      <a href="lunch_wheel.html">🎯 吃什麼轉盤</a>　·　
+      <a href="lunch_admin.html">主揪管理頁 →</a>
+    </div>
   `;
 }
 
@@ -475,7 +478,10 @@ function renderClosedView() {
     <div class="card">
       <button class="ghost" onclick="copySummary()">複製彙整文字</button>
     </div>
-    <div class="footer-link"><a href="lunch_admin.html">主揪管理頁 →</a></div>
+    <div class="footer-link">
+      <a href="lunch_wheel.html">🎯 吃什麼轉盤</a>　·　
+      <a href="lunch_admin.html">主揪管理頁 →</a>
+    </div>
   `;
 }
 
