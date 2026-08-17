@@ -226,8 +226,17 @@ init();
 async function init() {
   // 餐廳清單要先到，開單表單的下拉選單才有東西可選
   await loadRestaurants();
+
+  // 轉盤頁可以帶 ?r=<餐廳>&tab=menu 過來，直接跳到那間的菜單維護
+  const q = new URLSearchParams(location.search);
+  const preset = q.get('r');
+  if (preset && state.restaurants.some((r) => r.restaurantId === preset)) {
+    state.menuRestaurantId = preset;
+  }
+
   await loadSession();
   renderMenuTab();
+  if (q.get('tab') === 'menu') switchTab('menu');
   startPolling();
 }
 

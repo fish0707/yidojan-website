@@ -165,11 +165,10 @@ async function init() {
     const data = await gasGet({ action: 'getRestaurants' });
     if (data.status === 'error') throw new Error(data.error);
 
-    // 停用的、或一個上架品項都沒有的餐廳不放進轉盤——
-    // 轉到一間空菜單的店，這個遊戲就白玩了
-    state.all = (data.restaurants || []).filter(
-      (r) => r.active && (r.menu || []).some((m) => m.available),
-    );
+    // 只要沒被停用就進轉盤，還沒建菜單也算。
+    // 這個轉盤的用途是「先決定去哪一間」，菜單是決定之後的事——
+    // 新增一間店卻要先把菜單建完才能抽，本末倒置。
+    state.all = (data.restaurants || []).filter((r) => r.active);
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = '';
@@ -263,12 +262,17 @@ function renderResultCard(r) {
       <div style="text-align:center;margin:12px 0 4px">
         <a href="lunch_admin.html?r=${encodeURIComponent(r.restaurantId)}"><button class="ghost">用這間開單 →</button></a>
       </div>
-      <h2 style="margin-top:16px">菜單 <span class="hint">${menu.length} 項</span></h2>
+      <h2 style="margin-top:16px">菜單 <span class="hint">${menu.length ? menu.length + ' 項' : '還沒建'}</span></h2>
       ${r.menuImageUrl
         ? `<a class="dm-link" href="${esc(r.menuImageUrl)}" target="_blank" rel="noopener">📄 看原始菜單 DM</a>`
         : ''}
       ${menu.length === 0
-        ? '<div class="empty">這間還沒有上架的品項</div>'
+        ? `<div class="empty">
+             這間還沒建菜單，不過決定去哪吃就夠了 🙂<br><br>
+             <a href="lunch_admin.html?r=${encodeURIComponent(r.restaurantId)}&tab=menu">
+               <button class="ghost">去建這間的菜單 →</button>
+             </a>
+           </div>`
         : groupByCategory(menu).map((g) => `
             ${g.name ? `<div class="cat-label">${esc(g.name)}</div>` : ''}
             <div class="menu-grid">
