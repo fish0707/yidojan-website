@@ -135,7 +135,9 @@ const TAX_RATE = 0.0015;     // 現股當沖證交稅（一般賣出是 0.003，
  */
 function tradeCost(entry, exit, lots, opts, side) {
   const shares = lots * 1000;
-  const discount = opts && opts.feeDiscount != null ? opts.feeDiscount : 0.6;
+  // 預設無折扣，跟 DEFAULT_SETTINGS 一致。這裡若留 0.6 而設定是 1.0，
+  // 漏帶 opts 的呼叫端會靜默用比較便宜的成本算，把獲利算得比實際好看。
+  const discount = opts && opts.feeDiscount != null ? opts.feeDiscount : 1.0;
   const minFee = opts && opts.minFee != null ? opts.minFee : 20;
   const rawBuy = entry * shares * FEE_RATE * discount;
   const rawSell = exit * shares * FEE_RATE * discount;
@@ -268,14 +270,22 @@ function isMarketHours(ms) {
   return m >= MARKET_OPEN_MINUTES && m < MARKET_CLOSE_MINUTES;
 }
 
-// 09:00 之後第幾根 15 分鐘蠟燭（0 起算）；非交易時間回傳 null，呼叫端要自己先檔 isMarketHours
-function candleIndex(ms) {
+// 09:00 之後第幾根蠟燭（0 起算）；非交易時間回傳 null，呼叫端要自己先檔 isMarketHours
+function candleIndex(ms, minutes) {
   if (!isMarketHours(ms)) return null;
-  return Math.floor((taipeiMinutesOfDay(ms) - MARKET_OPEN_MINUTES) / CANDLE_MINUTES);
+  return Math.floor((taipeiMinutesOfDay(ms) - MARKET_OPEN_MINUTES) / (minutes || CANDLE_MINUTES));
 }
 
-function isOpeningCandle(idx) {
-  return idx === 0;   // 對應 09:00-09:15，PDF 策略與檢查表都要求跳過這段亂流
+/**
+ * 這根蠟燭是否落在開盤亂流時段（09:00-09:15），PDF 策略與檢查表都要求跳過。
+ *
+ * 原本寫死 idx === 0。那只有在蠟燭週期剛好是 15 分鐘時才等於 09:00-09:15——
+ * 純屬巧合，OPENING_NOISE_MINUTES 這個常數宣告了卻從來沒被用到。
+ * 週期一改成 5 分鐘，「跳過前 15 分鐘」會無聲縮成「跳過前 5 分鐘」。
+ * 改成用分鐘換算，任何週期下都正確（5分→前3根、10分→前2根、15分→前1根）。
+ */
+function isOpeningCandle(idx, minutes) {
+  return idx < Math.ceil(OPENING_NOISE_MINUTES / (minutes || CANDLE_MINUTES));
 }
 
 /**
@@ -289,10 +299,10 @@ function isOpeningCandle(idx) {
  * 回傳 { candle, closedCandle }：closedCandle 只在「這一輪跨到下一根蠟燭」時才有值，
  * 代表剛剛結束的那根蠟燭——訊號判定要用這個，不要用還在形成中的 candle。
  */
-function updateCandle(prevCandle, tick, nowMs, lastKnownPrice) {
+function updateCandle(prevCandle, tick, nowMs, lastKnownPrice, minutes) {
   if (!isMarketHours(nowMs)) return { candle: prevCandle, closedCandle: null };
 
-  const idx = candleIndex(nowMs);
+  const idx = candleIndex(nowMs, minutes);
   const price = tick && tick.price != null ? tick.price : lastKnownPrice;
   if (price == null) return { candle: prevCandle, closedCandle: null };   // 從沒拿到過價格，還不能開蠟燭
 
@@ -372,6 +382,50 @@ function evaluateExit(position, tick, nowMs) {
     return { reason: 'time', price: price != null ? price : entry };
   }
   return null;
+}
+
+/**
+ * 這筆到底划不划算——1:1 策略在台股的生死線。
+ *
+ * 期望值/股 = p(d − c) − (1−p)(d + c) = d(2p−1) − c
+ *   d = 停損距離，c = 每股來回成本，p = 勝率
+ *
+ * 反過來解，就得到兩個一眼就懂的數字：
+ *   · 停損距離至少要多大：d > c / (2p−1)
+ *   · 這筆需要多少勝率才不賠：p > (1 + c/d) / 2
+ *
+ * 第二個特別有用。停損距離只有成本的一倍時，requiredWinRate 會超過 100%——
+ * 那代表就算每一筆都猜對還是賠，跟勝率高不高完全無關。使用者實際踩到的那筆
+ * （50.50 進場、停損 50.70、無折扣）就是這種：需要 105% 勝率，數學上不可能。
+ *
+ * 收盤篩選本來就有 requirePositiveExpectancy 會擋掉這種標的，但盤中訊號確認後
+ * 是拿「實際那根 K 棒的極值」重算停損的，常常比收盤估的窄很多，卻沒有再檢查一次。
+ */
+function tradeViability(plan, settings) {
+  const s = settings || {};
+  const winRate = s.assumedWinRate != null ? s.assumedWinRate : 0.7653;
+  const d = plan.stopDistance;
+  const costPerShare = plan.shares > 0 ? plan.costDetail.total / plan.shares : 0;
+  const edge = 2 * winRate - 1;
+
+  // 勝率 ≤ 50% 時 1:1 沒有任何停損距離救得回來
+  const minStopDistance = edge > 0 ? roundToTick(costPerShare / edge, 'up') : Infinity;
+  const requiredWinRate = d > 0 ? (1 + costPerShare / d) / 2 : Infinity;
+  // 維持 1:1 不動的前提下，這筆要多少報酬倍數才會轉正
+  const requiredRatio = (d > 0 && winRate > 0)
+    ? Number((((1 - winRate) * d + costPerShare) / (winRate * d)).toFixed(2))
+    : Infinity;
+
+  return {
+    costPerShare: Number(costPerShare.toFixed(4)),
+    costShare: plan.shares > 0 && d > 0 ? plan.costDetail.total / (d * plan.shares) : 1,
+    minStopDistance,
+    requiredWinRate,
+    requiredRatio,
+    // netWin ≤ 0 是絕對紅線：代表就算完美走到目標價還是賠錢
+    impossible: plan.netWin <= 0 || requiredWinRate >= 1,
+    viable: plan.netWin > 0 && plan.expectancy > 0 && d >= minStopDistance
+  };
 }
 
 /** 實際出場後的損益（重用 tradeCost，不重算費用與稅） */
@@ -769,7 +823,7 @@ async function loadHistory(maxDays) {
 
 const DEFAULT_SETTINGS = {
   riskBudget: 3000,        // 單筆最大可虧金額（不是買進金額）
-  feeDiscount: 0.6,
+  feeDiscount: 1.0,        // 無折扣。保守假設——寧可低估獲利，也不要高估
   minFee: 20,
   minPrice: 10,            // 10 元以下跳動檔位太小，容易被來回巴
   maxPrice: 80,
@@ -780,6 +834,7 @@ const DEFAULT_SETTINGS = {
   includeTpex: false,
   maxCandidates: 12,
   maxLots: 10,
+  candleMinutes: 15,       // 蠟燭週期。越短→停損越窄→越可能被成本吃掉，見 tradeViability
   assumedWinRate: 0.7653,
   requireDayTradeList: true,
   requirePositiveExpectancy: true
@@ -973,7 +1028,7 @@ if (typeof module !== 'undefined' && module.exports) {
     limitStatus, demoData, DEFAULT_SETTINGS, DATA_BASE, unpackDay,
     fetchMarketData, saveDay, loadHistory, dbDates,
     taipeiMinutesOfDay, isMarketHours, candleIndex, isOpeningCandle,
-    updateCandle, evaluateSweep, evaluateExit, realizePnl, quoteCode, fetchQuotes,
+    updateCandle, evaluateSweep, evaluateExit, realizePnl, tradeViability, quoteCode, fetchQuotes,
     MARKET_OPEN_MINUTES, MARKET_CLOSE_MINUTES, CANDLE_MINUTES,
     NO_NEW_ENTRY_MINUTES, FORCE_CLOSE_MINUTES
   };

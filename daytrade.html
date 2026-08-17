@@ -166,7 +166,14 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
     <h2>篩選設定</h2>
     <div class="grid">
       <label class="field">單筆風險預算（元）<input type="number" id="set-riskBudget" min="500" step="100"></label>
-      <label class="field">手續費折數（0.6 = 六折）<input type="number" id="set-feeDiscount" min="0.1" max="1" step="0.05"></label>
+      <label class="field">手續費折數（1.0 = 無折扣）<input type="number" id="set-feeDiscount" min="0.05" max="1" step="0.01"></label>
+      <label class="field">K 棒週期（分鐘）
+        <select id="set-candleMinutes">
+          <option value="5">5 分鐘</option>
+          <option value="10">10 分鐘</option>
+          <option value="15">15 分鐘（原策略）</option>
+        </select>
+      </label>
       <label class="field">最低手續費（元）<input type="number" id="set-minFee" min="0" step="1"></label>
       <label class="field">股價下限<input type="number" id="set-minPrice" min="1" step="1"></label>
       <label class="field">股價上限<input type="number" id="set-maxPrice" min="1" step="1"></label>
@@ -184,6 +191,7 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
       <label class="check"><input type="checkbox" id="set-requirePositiveExpectancy"> 剔除期望值為負的標的</label>
     </div>
     <p class="note">設定會存在這台裝置的瀏覽器裡。「期望值假設勝率」只影響排序參考值，改高不會讓你真的變準。</p>
+    <p class="note" id="set-viability-note"></p>
   </div>
 
   <div class="panel" id="result-panel">
@@ -303,7 +311,7 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
   const FIELDS = [
     ['riskBudget', 'number'], ['feeDiscount', 'number'], ['minFee', 'number'],
     ['minPrice', 'number'], ['maxPrice', 'number'], ['minVolumeLots', 'number'],
-    ['maxLots', 'number'], ['maxCandidates', 'number'],
+    ['maxLots', 'number'], ['maxCandidates', 'number'], ['candleMinutes', 'number'],
     ['includeTwse', 'bool'], ['includeTpex', 'bool'],
     ['requireDayTradeList', 'bool'], ['requirePositiveExpectancy', 'bool']
   ];
@@ -344,7 +352,45 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
     const wr = Number($('set-assumedWinRatePct').value);
     if (isFinite(wr)) s.assumedWinRate = wr / 100;
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) { /* 無痕模式會擋，忽略 */ }
+    renderViabilityNote(s);
     return s;
+  }
+
+  /**
+   * 把「這組設定下，停損距離至少要多大才可能賺」直接算給使用者看。
+   *
+   * 手續費折數與 K 棒週期都會動到這個門檻，但兩者的影響方向剛好相反：
+   * 折數越低→門檻越低（好），K 棒越短→停損越窄→越容易低於門檻（壞）。
+   * 不寫出來的話，使用者很容易以為「改短一點反應比較快」是純好處。
+   */
+  function renderViabilityNote(s) {
+    const el = $('set-viability-note');
+    if (!el) return;
+    const costPct = (0.001425 * s.feeDiscount * 2 + 0.0015);
+    const edge = 2 * s.assumedWinRate - 1;
+    if (edge <= 0) {
+      el.innerHTML = '<span class="hint">假設勝率 ≤ 50% 時，1:1 的策略沒有任何停損距離救得回來。</span>';
+      return;
+    }
+    const minPct = costPct / edge;
+    const mins = s.candleMinutes;
+    // 15 分鐘 K 的高低差大約是日振幅 ÷ √(270/15)；週期越短除得越多
+    const est = (dayRangePct) => dayRangePct / Math.sqrt(270 / mins);
+    const est4 = est(4);
+    const tooShort = est4 < minPct * 100;
+    el.innerHTML =
+      '<b>目前設定下的可獲利門檻：</b>停損距離至少要 <b>' + (minPct * 100).toFixed(2) + '%</b>' +
+      '（50 元股票 ' + (50 * minPct).toFixed(2) + ' 元、30 元股票 ' + (30 * minPct).toFixed(2) + ' 元）。' +
+      '低於這個距離，1:1 扣完成本後就是負期望值。<br>' +
+      '選了 <b>' + mins + ' 分鐘</b> K 棒：日振幅 4% 的股票，單根高低差大約 ' + est4.toFixed(2) + '%，' +
+      (tooShort
+        ? '<span class="hint">低於門檻 ' + (minPct * 100).toFixed(2) + '%——這個週期下多數訊號會被標成「不建議進場」。</span>'
+        : '高於門檻，多數訊號還過得了關。') +
+      (s.feeDiscount >= 1
+        ? '<br><span class="hint">你目前是無折扣。跟券商談到 2.8 折的話，門檻會從 ' +
+          (minPct * 100).toFixed(2) + '% 降到 ' +
+          (((0.001425 * 0.28 * 2 + 0.0015) / edge) * 100).toFixed(2) + '%，可做的機會會多很多。</span>'
+        : '');
   }
 
   // ── 盤中檢查表的打勾狀態（依日期 + 代號存，隔天自動歸零）──────────────────
@@ -703,7 +749,8 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
         plan: null,              // 訊號確認時算出的建議價位，要存下來，列上跟作戰卡都要用
         position: null,          // 你實際的持倉：{ side, entry, stop, target, lots, dayHighAtEntry, dayLowAtEntry }
         exit: null,              // { reason, price, pnl }
-        lateSignal: false        // 13:00 之後才確認的訊號：顯示但不催你進場
+        lateSignal: false,       // 13:00 之後才確認的訊號：顯示但不催你進場
+        viability: null          // 訊號確認後算出的「這筆划不划算」，見 tradeViability()
       });
     }
     live = {
@@ -766,6 +813,12 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
       return { text: '持倉中', cls: 'warn' };
     }
     if (it.status === 'confirmed') {
+      if (it.viability && !it.viability.viable) {
+        const v = it.viability;
+        return v.impossible
+          ? { text: '不建議進場（數學上不可能賺）', cls: 'long' }
+          : { text: '不建議進場（停損太窄，成本吃光）', cls: 'long' };
+      }
       return it.lateSignal
         ? { text: '已確認（過 13:00，不開新倉）', cls: '' }
         : { text: '已確認', cls: 'warn' };
@@ -788,16 +841,33 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
     const src = it.position || it.plan;
     if (!src) return '<span style="color:var(--muted)">—</span>';
     const tag = it.position ? '實際成交' : '建議';
+    const v = it.viability;
+    // 只印三個價格是不夠的——使用者就是因為看不到金額，自己心算才發現那筆賠定了
+    const money_ = v
+      ? '<div style="margin-top:.2rem;border-top:1px dashed rgba(255,255,255,.12);padding-top:.2rem">' +
+        '<div style="color:var(--short)">賺 ' + money(src.netWin) + '</div>' +
+        '<div style="color:var(--long)">賠 ' + money(src.netLoss) + '</div>' +
+        '<div style="color:' + (v.requiredWinRate >= 1 ? 'var(--long)' : 'var(--muted)') + '">需勝率 ' +
+          (v.requiredWinRate >= 1 ? '不可能' : Math.round(v.requiredWinRate * 100) + '%') + '</div>' +
+        '</div>'
+      : '';
     return '<div style="font-size:.78rem;line-height:1.5">' +
       '<div style="color:var(--muted)">' + tag + '</div>' +
       '<div>進 <b>' + fmt(src.entry) + '</b></div>' +
       '<div style="color:var(--long)">損 ' + fmt(src.stop) + '</div>' +
       '<div style="color:var(--short)">標 ' + fmt(src.target) + '</div>' +
+      money_ +
       '</div>';
   }
 
   function actionCell(it) {
     if (it.status === 'confirmed') {
+      // 不划算的訊號不給一顆長得跟平常一樣的按鈕——那等於在慫恿你按下去。
+      // 改成「仍要進場」，而且要再確認一次。
+      if (it.viability && !it.viability.viable) {
+        return '<button data-act="enter-anyway" data-code="' + it.candidate.code +
+          '" style="font-size:.75rem;padding:.25rem .5rem;border-color:var(--long);color:var(--long)">仍要進場</button>';
+      }
       return '<button data-act="enter" data-code="' + it.candidate.code + '" style="font-size:.78rem;padding:.25rem .5rem">我進場了</button>';
     }
     if (it.status === 'holding') {
@@ -928,9 +998,14 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
     // 停損維持在原本的掃蕩極值——那是結構性價位，不會因為你成交價不同就跟著移動。
     // 目標則要以你的實際成交價重算 1:1，這樣算出來的才是你自己的報酬比。
     const p = planTrade(side, roundToTick(actualPrice, 'nearest'), it.plan.stop, live.settings);
+    // 用實際成交價重算一次——滑價會讓停損距離跟目標都變，划不划算也跟著變
+    it.viability = tradeViability(p, live.settings);
     const tick = it.lastTick || {};
     it.position = {
       side, entry: p.entry, stop: p.stop, target: p.target, lots: p.lots,
+      // 金額也要帶著。levelsCell 在持倉後是讀 position，少了這兩個就會顯示「—」，
+      // 剛好把使用者最需要看到的兩個數字藏起來。
+      netWin: p.netWin, netLoss: p.netLoss, stopDistance: p.stopDistance,
       dayHighAtEntry: tick.high != null ? tick.high : it.lastKnownPrice,
       dayLowAtEntry: tick.low != null ? tick.low : it.lastKnownPrice,
       at: live.nowFn()
@@ -964,6 +1039,17 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
     if (!btn) return;
     const code = btn.dataset.code;
     if (btn.dataset.act === 'enter') promptEntry(code);
+    else if (btn.dataset.act === 'enter-anyway') {
+      // 不划算的訊號要多一道確認，並且把最刺眼的數字直接講出來
+      const it = live.items.get(code);
+      const v = it && it.viability;
+      if (!v) return;
+      const why = v.impossible
+        ? '這筆就算完美走到目標價也是賠 ' + money(Math.abs(it.plan.netWin)) + ' 元。'
+        : '這筆需要 ' + Math.round(v.requiredWinRate * 100) + '% 勝率才不賠，'
+          + '停損距離要 ' + fmt(v.minStopDistance) + ' 元以上才划算（現在只有 ' + fmt(it.plan.stopDistance) + '）。';
+      if (confirm(why + '\n\n確定還是要進場嗎？')) promptEntry(code);
+    }
     else if (btn.dataset.act === 'enter-ok') confirmEntry(code);
     else if (btn.dataset.act === 'close') manualClose(code);
   });
@@ -985,7 +1071,8 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
     const byCode = new Map(quotes.map((q) => [q.code, q]));
     for (const [code, it] of live.items) {
       const tick = byCode.get(code) || { price: null };
-      const { candle, closedCandle } = updateCandle(it.candle, tick, nowMs, it.lastKnownPrice);
+      const mins = live.settings.candleMinutes;
+      const { candle, closedCandle } = updateCandle(it.candle, tick, nowMs, it.lastKnownPrice, mins);
       it.candle = candle;
       if (tick.price != null) it.lastKnownPrice = tick.price;
       it.lastTick = tick;
@@ -1007,20 +1094,25 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
       // ── 還沒進場：照舊找掃蕩收回訊號 ──
       if (candle && it.status !== 'confirmed') {
         const sweepNow = evaluateSweep(candle, it.candidate.side, it.level);
-        it.status = (sweepNow.confirmed && !isOpeningCandle(candle.idx)) ? 'watching' : 'idle';
+        it.status = (sweepNow.confirmed && !isOpeningCandle(candle.idx, mins)) ? 'watching' : 'idle';
       }
 
-      if (closedCandle && it.status !== 'confirmed' && !isOpeningCandle(closedCandle.idx)) {
+      if (closedCandle && it.status !== 'confirmed' && !isOpeningCandle(closedCandle.idx, mins)) {
         const result = evaluateSweep(closedCandle, it.candidate.side, it.level);
         if (result.confirmed) {
           it.status = 'confirmed';
           const lv = levelsFromBar(it.candidate.side, closedCandle.high, closedCandle.low);
           // 這份要存下來——列上要顯示進/損/標，按「我進場了」時也要拿它的停損當基準
           it.plan = planTrade(it.candidate.side, lv.entry, lv.stop, live.settings);
+          // 收盤篩選會擋掉期望值為負的標的，但盤中是拿「實際那根 K 棒的極值」重算停損的，
+          // 常常比收盤估的窄很多。不在這裡再檢查一次，就會像使用者踩到的那筆一樣：
+          // 停損 0.20 元、需要 105% 勝率，工具卻還是播了成立提示音、給了進場按鈕。
+          it.viability = tradeViability(it.plan, live.settings);
           // 13:00 之後不開新倉，訊號照顯示但不催你（作戰卡紀律欄就是這樣寫的）
           it.lateSignal = taipeiMinutesOfDay(nowMs) >= NO_NEW_ENTRY_MINUTES;
           flashRow(code);
-          if (!it.lateSignal) beep('good');
+          // 不划算就不出成立音——聲音是在催人動作，不該為一筆賠定的交易響
+          if (!it.lateSignal && it.viability.viable) beep('good');
           refreshCardIfOpen(code, it.plan);
         }
       }
@@ -1171,7 +1263,8 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
     // 重置狀態，示範可以重複按
     for (const it of live.items.values()) {
       it.candle = null; it.lastKnownPrice = null; it.lastTick = null;
-      it.status = 'idle'; it.plan = null; it.position = null; it.exit = null; it.lateSignal = false;
+      it.status = 'idle'; it.plan = null; it.position = null; it.exit = null;
+      it.lateSignal = false; it.viability = null;
     }
     const dayRange = new Map();   // 累計日高日低，模擬證交所回的那兩個欄位
     renderLivePanel();
@@ -1324,6 +1417,10 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
   // ── 事件 ──────────────────────────────────────────────────────────────────
 
   $('btn-settings-toggle').addEventListener('click', () => $('settings-panel').classList.toggle('hidden'));
+  ['set-feeDiscount', 'set-candleMinutes', 'set-assumedWinRatePct'].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener('change', () => renderViabilityNote(formToSettings()));
+  });
   $('btn-paste-toggle').addEventListener('click', () => $('paste-panel').classList.toggle('hidden'));
 
   $('btn-fetch').addEventListener('click', async () => {
@@ -1391,6 +1488,7 @@ footer { color: var(--muted); font-size: .78rem; padding: 1.5rem 0 2.5rem; text-
   // ── 起始 ──────────────────────────────────────────────────────────────────
 
   settingsToForm(loadSettings());
+  renderViabilityNote(loadSettings());
   loadHistory(90).then((h) => {
     if (h.days > 0) {
       setStatus('本地歷史庫已有 ' + h.days + ' 個交易日的資料' +
