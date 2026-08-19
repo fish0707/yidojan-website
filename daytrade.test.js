@@ -104,23 +104,36 @@ const at = (h, m) => Date.parse('2026-08-19T00:00:00Z') + (h * 60 + m - 480) * 6
     }
   }
   const series = D.marketReturnSeries(history);
-  ok('大盤報酬序列有 59 天', series.length === 59, String(series.length));
+  ok('大盤報酬序列 = 天數 − 1', series.length === idx.days.length - 1,
+     series.length + ' vs ' + idx.days.length);
   const mm = new Map(series.map((r) => [r.date, r.ret]));
 
+  // 這裡刻意用「範圍」而不是固定值：GitHub Actions 每個交易日都會換掉最舊的一天，
+  // 釘死到小數點後兩位的話，這個測試每天都會紅一次，但那不是程式壞了。
+  // 範圍夠窄，公式真的寫錯一定抓得到；下面的 console 會印出當下的實際值供對照。
+  //
+  // 規劃階段用 2026-05-21～2026-08-14 那 59 天算出來的基準：
+  //   3481 β1.44 r0.76 11% ／ 4989 β1.39 r0.74 30% ／ 3149 β0.98 r0.57 35% ／ 2886 β−0.02 r−0.04 49%
   const expect = {
-    '3481': { beta: 1.44, corr: 0.76, p: 0.11 },
-    '4989': { beta: 1.39, corr: 0.74, p: 0.30 },
-    '3149': { beta: 0.98, corr: 0.57, p: 0.35 },
-    '2886': { beta: -0.02, corr: -0.04, p: 0.49 }
+    '3481': { beta: [1.25, 1.65], corr: [0.68, 0.85], p: [0.05, 0.22] },
+    '4989': { beta: [1.20, 1.60], corr: [0.65, 0.85], p: [0.20, 0.42] },
+    '3149': { beta: [0.80, 1.20], corr: [0.45, 0.70], p: [0.25, 0.48] },
+    '2886': { beta: [-0.20, 0.20], corr: [-0.20, 0.20], p: [0.40, 0.60] }
   };
+  const inRange = (v, r) => v != null && v >= r[0] && v <= r[1];
+  const table = [];
   for (const [code, e] of Object.entries(expect)) {
     const al = D.alignReturns(history.get(code), mm);
     const b = D.marketBeta(al.stock, al.market);
-    ok(code + ' beta ≈ ' + e.beta, b && near(b.beta, e.beta, 0.005), b && b.beta);
-    ok(code + ' 相關性 ≈ ' + e.corr, b && near(b.corr, e.corr, 0.005), b && b.corr);
-    ok(code + ' 大盤漲時做空正確率 ≈ ' + Math.round(e.p * 100) + '%',
-       b && near(b.upDayDownProb, e.p, 0.006), b && b.upDayDownProb);
+    table.push('    ' + code + '  β ' + (b && b.beta) + '  r ' + (b && b.corr) +
+      '  大盤漲時做空對的機率 ' + (b && b.upDayDownProb != null ? Math.round(b.upDayDownProb * 100) + '%' : '—'));
+    ok(code + ' beta 落在 ' + e.beta.join('~'), b && inRange(b.beta, e.beta), b && b.beta);
+    ok(code + ' 相關性落在 ' + e.corr.join('~'), b && inRange(b.corr, e.corr), b && b.corr);
+    ok(code + ' 大盤漲時做空正確率落在 ' + e.p.map((x) => Math.round(x * 100) + '%').join('~'),
+       b && inRange(b.upDayDownProb, e.p), b && b.upDayDownProb);
   }
+  console.log('  目前資料（' + series.length + ' 天）算出來的實際值：');
+  console.log(table.join('\n'));
 
   // 方向過濾：大盤上漲時做空 3481 要被擋；2886 相關性太弱只註記不擋
   const al3481 = D.alignReturns(history.get('3481'), mm);
@@ -145,6 +158,25 @@ const at = (h, m) => Date.parse('2026-08-19T00:00:00Z') + (h * 60 + m - 480) * 6
   // 大盤上漲時做多 3481 應該是順勢，方向正確率高
   const fLong = D.marketDirectionFilter('long', b3481, 0.8);
   ok('大盤漲 → 做多 3481 方向正確率 ≈ 89%', near(fLong.prob, 0.89, 0.01), fLong.prob);
+}
+
+// ── 4b. marketBeta 公式本身：用手算得出答案的固定 fixture，不受資料更新影響 ──────
+{
+  // 個股報酬 = 2 × 大盤報酬（完全連動、beta 剛好 2、相關性剛好 1）
+  const market = [0.01, -0.01, 0.02, -0.02, 0.005, -0.005, 0.015, -0.015, 0.01, -0.01, 0.02, -0.02];
+  const stock = market.map((x) => x * 2);
+  const b = D.marketBeta(stock, market);
+  ok('完全連動 → beta = 2', near(b.beta, 2, 1e-6), b.beta);
+  ok('完全連動 → 相關性 = 1', near(b.corr, 1, 1e-6), b.corr);
+  ok('完全同向 → 大盤漲時做空永遠錯', b.upDayDownProb === 0, b.upDayDownProb);
+  ok('完全同向 → 大盤跌時做多永遠錯', b.downDayUpProb === 0, b.downDayUpProb);
+
+  const inverse = D.marketBeta(market.map((x) => -x), market);
+  ok('完全反向 → beta = −1', near(inverse.beta, -1, 1e-6), inverse.beta);
+  ok('完全反向 → 大盤漲時做空永遠對', inverse.upDayDownProb === 1, inverse.upDayDownProb);
+
+  ok('樣本 < 10 天回 null', D.marketBeta([0.01, 0.02], [0.01, 0.02]) === null);
+  ok('大盤沒有變異回 null', D.marketBeta(stock, market.map(() => 0)) === null);
 }
 
 // ── 5. 時間出場機率 ──────────────────────────────────────────────────────────
