@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今天吃什麼 - 轉盤</title>
+<style>
+:root {
+  --primary-orange: #FF7F3F;
+  --secondary-orange: #FF9966;
+  --accent-orange: #FFB380;
+  --light-bg: #FFF5F0;
+  --white: #FFFFFF;
+  --text-dark: #3D3D3D;
+  --text-light: #6B6B6B;
+  --border-light: #FFE8DC;
+  --ok: #3FA35F;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', 'PingFang TC', 'PingFang SC', 'Microsoft JhengHei', sans-serif;
+  background: var(--light-bg);
+  color: var(--text-dark);
+  line-height: 1.6;
+  padding-bottom: 40px;
+}
+.wrap { max-width: 720px; margin: 0 auto; padding: 0 14px; }
+
+.topbar {
+  background: linear-gradient(135deg, var(--primary-orange), var(--secondary-orange));
+  color: #fff; padding: 16px 0;
+}
+.topbar .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.topbar h1 { font-size: 1.2rem; font-weight: 700; }
+.topbar .sub { font-size: .8rem; opacity: .92; }
+.topbar a { color: #fff; font-size: .82rem; text-decoration: none; white-space: nowrap; }
+.topbar a:hover { text-decoration: underline; }
+
+.card {
+  background: var(--white);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 16px;
+  margin-top: 14px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+}
+.card h2 {
+  font-size: 1.02rem; font-weight: 600; color: var(--primary-orange);
+  margin-bottom: 12px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.card h2 .hint { font-size: .75rem; font-weight: 400; color: var(--text-light); }
+
+button {
+  font-family: inherit; font-size: .9rem; cursor: pointer;
+  border: none; border-radius: 8px; padding: 10px 16px;
+  background: var(--primary-orange); color: #fff; font-weight: 600;
+  transition: filter .15s, transform .1s;
+  min-height: 40px;
+}
+button:hover:not(:disabled) { filter: brightness(1.06); }
+button:active:not(:disabled) { transform: scale(.98); }
+button:disabled { background: #ccc; cursor: not-allowed; }
+button.ghost { background: #fff; color: var(--primary-orange); border: 1px solid var(--accent-orange); }
+button.subtle { background: var(--border-light); color: var(--text-dark); }
+
+/* ── 轉盤 ── */
+.wheel-box { position: relative; width: 100%; max-width: 380px; margin: 0 auto; }
+.wheel-box canvas { width: 100%; display: block; }
+/* 指針固定在正上方，轉盤停下來時對到的就是結果 */
+.pointer {
+  position: absolute; top: -4px; left: 50%; transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 13px solid transparent;
+  border-right: 13px solid transparent;
+  border-top: 22px solid var(--text-dark);
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,.25));
+  z-index: 2;
+}
+.spin-row { display: flex; gap: 10px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
+.spin-row button { padding: 12px 28px; font-size: 1rem; }
+
+.candidates { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; justify-content: center; }
+.chip {
+  font-size: .78rem; padding: 4px 11px; border-radius: 99px;
+  background: var(--border-light); color: var(--text-dark);
+}
+.chip.win { background: var(--primary-orange); color: #fff; font-weight: 600; }
+
+.bench { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--border-light); }
+.bench-label { font-size: .76rem; color: var(--text-light); text-align: center; margin-bottom: 8px; }
+.bench-chip {
+  background: #fff; color: var(--text-light);
+  border: 1px dashed var(--accent-orange);
+  font-size: .78rem; padding: 4px 11px; min-height: 0; font-weight: 400;
+  border-radius: 99px; cursor: pointer;
+}
+.bench-chip:hover:not(:disabled) { background: #FFF8F4; color: var(--primary-orange); filter: none; }
+
+/* ── 結果 ── */
+.result-name {
+  font-size: 1.5rem; font-weight: 700; color: var(--primary-orange);
+  text-align: center; margin-bottom: 2px;
+}
+.result-meta { text-align: center; font-size: .84rem; color: var(--text-light); margin-bottom: 6px; }
+.result-card { animation: pop .35s ease-out; }
+@keyframes pop { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: none; } }
+
+.cat-label {
+  font-size: .8rem; font-weight: 600; color: var(--text-light);
+  letter-spacing: .06em; margin: 14px 0 8px;
+  padding-bottom: 4px; border-bottom: 1px solid var(--border-light);
+}
+.cat-label:first-of-type { margin-top: 0; }
+.menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.menu-item {
+  border: 1px solid var(--border-light); border-radius: 8px; padding: 12px;
+  background: #fff; display: flex; flex-direction: column; gap: 2px;
+}
+.menu-item .n { font-weight: 600; font-size: .95rem; }
+.menu-item .p { color: var(--primary-orange); font-weight: 600; font-size: .9rem; }
+.dm-link {
+  display: block; font-size: .82rem; color: var(--primary-orange);
+  background: #FFF8F4; border: 1px solid var(--border-light); border-radius: 8px;
+  padding: 9px 12px; margin-bottom: 12px; text-decoration: none;
+}
+.dm-link:hover { background: #FFF0E6; }
+
+.loading, .empty { color: var(--text-light); text-align: center; padding: 30px 0; font-size: .9rem; }
+.footer-link { text-align: center; margin-top: 18px; font-size: .84rem; }
+.footer-link a { color: var(--primary-orange); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap">
+    <div>
+      <h1>🎯 今天吃什麼</h1>
+      <div class="sub">選擇困難的時候，交給轉盤</div>
+    </div>
+    <a href="lunch_admin.html">主揪管理頁 →</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <div id="loading" class="loading">載入餐廳中…</div>
+  <div id="content" style="display:none"></div>
+</div>
+
+<script src="lunch.js"></script>
+<script>
+// 一次抽幾間進轉盤
+const WHEEL_SIZE = 5;
+// 轉盤至少轉幾圈才停（純粹是為了好看）
+const MIN_TURNS = 4;
+const SPIN_MS = 4200;
+
+const SEG_COLORS = ['#FF7F3F', '#FFA05C', '#F2653C', '#FFB380', '#E8552F', '#FF8F52'];
+
+const state = {
+  all: [],        // 所有可以進轉盤的餐廳（沒被停用的都算）
+  picks: [],      // 這一輪抽出來的候選
+  winner: null,   // 轉出來的結果
+  spinning: false,
+  rot: 0,         // 轉盤目前的角度（弧度）
+};
+
+let canvas = null, ctx = null;
+
+init();
+
+async function init() {
+  try {
+    const data = await gasGet({ action: 'getRestaurants' });
+    if (data.status === 'error') throw new Error(data.error);
+
+    // 只要沒被停用就進轉盤，還沒建菜單也算。
+    // 這個轉盤的用途是「先決定去哪一間」，菜單是決定之後的事——
+    // 新增一間店卻要先把菜單建完才能抽，本末倒置。
+    state.all = (data.restaurants || []).filter((r) => r.active);
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = '';
+    reshuffle();
+  } catch (e) {
+    document.getElementById('loading').innerHTML =
+      '載入失敗：' + esc(e.message) + '<br><br><button onclick="location.reload()">重新整理</button>';
+  }
+}
+
+/** 重新抽一組候選 */
+function reshuffle() {
+  state.picks = sample(state.all, WHEEL_SIZE);
+  state.winner = null;
+  // 讓第一格的「中心」對準指針，而不是格線對準指針（那樣看起來像沒對好）
+  state.rot = -Math.PI / 2 - Math.PI / Math.max(state.picks.length, 1);
+  render();
+}
+
+/** Fisher–Yates 洗牌後取前 n 個，每一間被抽中的機率相同 */
+function sample(list, n) {
+  const a = list.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, n);
+}
+
+function render() {
+  const el = document.getElementById('content');
+
+  if (state.all.length === 0) {
+    el.innerHTML = `<div class="card"><div class="empty">
+      還沒有可以抽的餐廳。<br><br>
+      請先到主揪管理頁的「餐廳菜單」分頁新增餐廳。<br><br>
+      <a href="lunch_admin.html"><button class="ghost">去新增餐廳 →</button></a>
+    </div></div>`;
+    return;
+  }
+  if (state.all.length === 1) {
+    const only = state.all[0];
+    el.innerHTML = `<div class="card"><div class="empty">
+      目前只有「${esc(only.name)}」一間餐廳，不用抽了 🙂
+    </div></div>` + renderResultCard(only);
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="card">
+      <h2>轉盤
+        <span class="hint">${state.picks.length} 間 · 共 ${state.all.length} 間可抽</span>
+      </h2>
+      <div class="wheel-box">
+        <div class="pointer"></div>
+        <canvas id="wheel"></canvas>
+      </div>
+      <div class="candidates">
+        ${state.picks.map((r) => `
+          <span class="chip ${state.winner && r.restaurantId === state.winner.restaurantId ? 'win' : ''}">
+            ${esc(r.name)}
+          </span>`).join('')}
+      </div>
+      ${renderBench()}
+      <div class="spin-row">
+        <button id="spinBtn" onclick="spin()" ${state.spinning ? 'disabled' : ''}>
+          ${state.winner ? '再轉一次' : '開始轉！'}
+        </button>
+        <button class="subtle" onclick="reshuffle()" ${state.spinning ? 'disabled' : ''}>
+          換一組 ${WHEEL_SIZE} 間
+        </button>
+      </div>
+    </div>
+    ${state.winner ? renderResultCard(state.winner) : ''}
+    <div class="footer-link"><a href="lunch.html">前往點餐頁 →</a></div>
+  `;
+
+  canvas = document.getElementById('wheel');
+  ctx = canvas.getContext('2d');
+  sizeCanvas();
+  drawWheel(state.rot);
+}
+
+function renderResultCard(r) {
+  const menu = (r.menu || []).filter((m) => m.available);
+  return `
+    <div class="card result-card">
+      <div class="result-name">🍱 ${esc(r.name)}</div>
+      <div class="result-meta">
+        ${r.phone ? '☎ ' + esc(r.phone) : ''}${r.phone && r.note ? ' · ' : ''}${esc(r.note || '')}
+      </div>
+      <div style="text-align:center;margin:12px 0 4px">
+        <a href="lunch_admin.html?r=${encodeURIComponent(r.restaurantId)}"><button class="ghost">用這間開單 →</button></a>
+      </div>
+      <h2 style="margin-top:16px">菜單 <span class="hint">${menu.length ? menu.length + ' 項' : '還沒建'}</span></h2>
+      ${r.menuImageUrl
+        ? `<a class="dm-link" href="${esc(r.menuImageUrl)}" target="_blank" rel="noopener">📄 看原始菜單 DM</a>`
+        : ''}
+      ${menu.length === 0
+        ? `<div class="empty">
+             這間還沒建菜單，不過決定去哪吃就夠了 🙂<br><br>
+             <a href="lunch_admin.html?r=${encodeURIComponent(r.restaurantId)}&tab=menu">
+               <button class="ghost">去建這間的菜單 →</button>
+             </a>
+           </div>`
+        : groupByCategory(menu).map((g) => `
+            ${g.name ? `<div class="cat-label">${esc(g.name)}</div>` : ''}
+            <div class="menu-grid">
+              ${g.items.map((m) => `
+                <div class="menu-item">
+                  <span class="n">${esc(m.name)}</span>
+                  <span class="p">${fmtMoney(m.price)}</span>
+                </div>`).join('')}
+            </div>`).join('')}
+    </div>`;
+}
+
+/**
+ * 這一輪沒被抽到的餐廳。
+ *
+ * 一定要顯示出來：只列轉盤上那 5 間的話，剛新增餐廳的人會以為自己沒加成功
+ * （「我有新增但沒有出現在轉盤」），其實只是這輪隨機沒抽到而已。
+ * 順便讓它可以直接點上轉盤，想吃哪間就不用一直重抽。
+ */
+function renderBench() {
+  const onWheel = new Set(state.picks.map((r) => r.restaurantId));
+  const bench = state.all.filter((r) => !onWheel.has(r.restaurantId));
+  if (!bench.length) return '';
+
+  return `
+    <div class="bench">
+      <div class="bench-label">這一輪沒抽到的 ${bench.length} 間 · 點一下就換上轉盤</div>
+      <div class="candidates">
+        ${bench.map((r) => `
+          <button class="chip bench-chip" onclick="swapIn('${esc(r.restaurantId)}')"
+            ${state.spinning ? 'disabled' : ''}>${esc(r.name)}</button>`).join('')}
+      </div>
+    </div>`;
+}
+
+/** 把指定餐廳換上轉盤，替掉隨機一格 */
+function swapIn(restaurantId) {
+  if (state.spinning) return;
+  const target = state.all.find((r) => r.restaurantId === restaurantId);
+  if (!target || state.picks.some((r) => r.restaurantId === restaurantId)) return;
+
+  state.picks[Math.floor(Math.random() * state.picks.length)] = target;
+  state.winner = null;
+  render();
+}
+
+/** 跟點餐頁同一套分類順序，看起來才一致 */
+function groupByCategory(menu) {
+  const order = ['主餐', '配菜', '湯品', '飲料', '甜點', '其他'];
+  const groups = [];
+  menu.forEach((m) => {
+    const key = m.category || '';
+    let g = groups.find((x) => x.name === key);
+    if (!g) { g = { name: key, items: [] }; groups.push(g); }
+    g.items.push(m);
+  });
+  if (groups.length <= 1) return [{ name: '', items: menu }];
+  groups.sort((a, b) => {
+    const ia = order.indexOf(a.name), ib = order.indexOf(b.name);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+  return groups;
+}
+
+// ─── 畫轉盤 ───────────────────────────────────────────────────────────────────
+function sizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const size = canvas.clientWidth || 320;
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  canvas.style.height = size + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function drawWheel(rot) {
+  if (!ctx) return;
+  const size = canvas.clientWidth || 320;
+  const cx = size / 2, cy = size / 2, r = size / 2 - 5;
+  const n = state.picks.length;
+  const seg = (Math.PI * 2) / n;
+
+  ctx.clearRect(0, 0, size, size);
+
+  for (let i = 0; i < n; i++) {
+    const a0 = rot + i * seg;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, a0, a0 + seg);
+    ctx.closePath();
+    ctx.fillStyle = SEG_COLORS[i % SEG_COLORS.length];
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 店名沿著半徑排，從外緣往內寫
+    const mid = a0 + seg / 2;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff';
+    const fs = Math.max(11, Math.min(17, size * 0.048));
+    ctx.font = `600 ${fs}px 'PingFang TC', 'Microsoft JhengHei', sans-serif`;
+    const label = ellipsis(state.picks[i].name, r - size * 0.16, ctx);
+
+    // 扇形指向左半邊時，文字會整個上下顛倒；多轉 180° 讓它維持正的
+    if (Math.cos(mid) < 0) {
+      ctx.rotate(mid + Math.PI);
+      ctx.textAlign = 'left';
+      ctx.fillText(label, -(r - 12), 0);
+    } else {
+      ctx.rotate(mid);
+      ctx.textAlign = 'right';
+      ctx.fillText(label, r - 12, 0);
+    }
+    ctx.restore();
+  }
+
+  // 中心的白色圓盤，讓文字不會擠在一起
+  ctx.beginPath();
+  ctx.arc(cx, cy, size * 0.085, 0, Math.PI * 2);
+  ctx.fillStyle = '#fff';
+  ctx.fill();
+  ctx.strokeStyle = 'var(--border-light)';
+  ctx.strokeStyle = '#FFE8DC';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+/** 名字太長就截斷加省略號，免得壓到隔壁扇形 */
+function ellipsis(text, maxWidth, c) {
+  if (c.measureText(text).width <= maxWidth) return text;
+  let s = text;
+  while (s.length > 1 && c.measureText(s + '…').width > maxWidth) s = s.slice(0, -1);
+  return s + '…';
+}
+
+// ─── 轉 ───────────────────────────────────────────────────────────────────────
+function spin() {
+  if (state.spinning || state.picks.length < 2) return;
+  state.spinning = true;
+  document.getElementById('spinBtn').disabled = true;
+
+  // 先抽出贏家，再回推轉盤該停在哪個角度。
+  // 反過來做（轉完再看指針指到誰）很容易因為浮點誤差落在邊界上，
+  // 導致「畫面顯示 A、程式判定 B」。
+  const n = state.picks.length;
+  const winnerIndex = Math.floor(Math.random() * n);
+  const seg = (Math.PI * 2) / n;
+
+  // 讓 winnerIndex 這一格的中心停在正上方（指針的位置，也就是 -90°）
+  let target = -Math.PI / 2 - (winnerIndex * seg + seg / 2);
+  while (target < state.rot + Math.PI * 2 * MIN_TURNS) target += Math.PI * 2;
+
+  const from = state.rot;
+  const dist = target - from;
+  const t0 = performance.now();
+
+  function frame(now) {
+    const p = Math.min(1, (now - t0) / SPIN_MS);
+    const eased = 1 - Math.pow(1 - p, 3);   // ease-out：快轉後慢慢停
+    state.rot = from + dist * eased;
+    drawWheel(state.rot);
+
+    if (p < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      state.rot = target;
+      state.spinning = false;
+      state.winner = state.picks[winnerIndex];
+      render();
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+// 轉向或改變視窗大小時要重算，不然畫面會糊掉或變形
+window.addEventListener('resize', () => {
+  if (!canvas || state.spinning) return;
+  sizeCanvas();
+  drawWheel(state.rot);
+});
+</script>
+</body>
+</html>
